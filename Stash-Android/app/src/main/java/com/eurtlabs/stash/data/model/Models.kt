@@ -157,7 +157,16 @@ data class LyricsResult(
     val artistName: String,
     val plainLyrics: String? = null,
     val syncedLyrics: List<LyricLine> = emptyList(),
-    val source: String = "LRCLIB"
+    val source: String = "Stash Engine"
+)
+
+data class UserPlaylist(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String,
+    val description: String = "",
+    val coverArtUrl: String? = null,
+    val tracks: List<TrackInfo> = emptyList(),
+    val createdAt: Long = System.currentTimeMillis()
 )
 
 enum class PlaybackRepeatMode {

@@ -82,6 +82,9 @@ object MusicPlayerManager {
     private val _playerState = MutableStateFlow(PlayerState())
     val playerState: StateFlow<PlayerState> = _playerState.asStateFlow()
 
+    @Volatile
+    var isAppInForeground: Boolean = true
+
     private val httpDataSourceFactory = DefaultHttpDataSource.Factory()
         .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         .setAllowCrossProtocolRedirects(true)
@@ -305,6 +308,65 @@ object MusicPlayerManager {
 
     fun playTrack(item: DownloadItem, queue: List<DownloadItem> = emptyList()) {
         playLibraryItem(item, queue)
+    }
+
+    fun playQueue(tracks: List<TrackInfo>, startIndex: Int = 0) {
+        if (tracks.isEmpty()) return
+        val targetIndex = startIndex.coerceIn(0, tracks.lastIndex)
+        playTrack(tracks[targetIndex], tracks)
+    }
+
+    fun playTrack(track: TrackInfo, queueTracks: List<TrackInfo> = emptyList()) {
+        val fullQueue = if (queueTracks.isNotEmpty()) queueTracks else listOf(track)
+        val index = fullQueue.indexOfFirst { it.id == track.id }.coerceAtLeast(0)
+
+        _playerState.value = _playerState.value.copy(
+            currentTrack = track,
+            currentItem = null,
+            isStreaming = true,
+            isBuffering = true,
+            queue = fullQueue,
+            queueIndex = index,
+            syncedLyrics = emptyList(),
+            plainLyrics = null,
+            isLyricsLoading = true
+        )
+
+        appContext?.let { ctx ->
+            MusicPlaybackService.start(ctx, track, isPlaying = true, positionMs = 0L, durationMs = track.durationMs)
+        }
+
+        playbackStreamJob?.cancel()
+        playbackStreamJob = scope.launch {
+            val streamUrl = InnerTubeMusicRepository.resolveStreamUrl(track.id)
+            if (streamUrl != null) {
+                withContext(Dispatchers.Main) {
+                    try {
+                        val mediaItem = MediaItem.fromUri(Uri.parse(streamUrl))
+                        val mediaSource = ProgressiveMediaSource.Factory(httpDataSourceFactory)
+                            .createMediaSource(mediaItem)
+
+                        exoPlayer?.apply {
+                            stop()
+                            clearMediaItems()
+                            setMediaSource(mediaSource)
+                            prepare()
+                            play()
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to start ExoPlayer stream: ${e.message}")
+                        _playerState.value = _playerState.value.copy(isBuffering = false)
+                    }
+                }
+            } else {
+                Log.e(TAG, "Could not resolve stream URL for ${track.id}")
+                _playerState.value = _playerState.value.copy(isBuffering = false)
+            }
+        }
+
+        fetchStudioArtworkForTrack(track)
+        fetchLyricsForTrack(track)
+        prefetchQueue(index)
     }
 
     fun playTrackFromQueue(index: Int) {
@@ -561,7 +623,8 @@ object MusicPlayerManager {
                         durationMs = player.duration.coerceAtLeast(0L)
                     )
                 }
-                delay(200)
+                // Adaptive polling: fast in foreground, slow in background to save CPU/battery
+                delay(if (isAppInForeground) 200L else 1000L)
             }
         }
     }
@@ -631,5 +694,25 @@ object MusicPlayerManager {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to attach hardware audio effects: ${e.message}")
         }
+    }
+
+    /**
+     * Releases all player resources. Call when the app is fully finishing.
+     */
+    fun release() {
+        progressJob?.cancel()
+        lyricsJob?.cancel()
+        artworkJob?.cancel()
+        playbackStreamJob?.cancel()
+        sleepTimerJob?.cancel()
+        try { equalizer?.release() } catch (_: Exception) {}
+        try { bassBoost?.release() } catch (_: Exception) {}
+        equalizer = null
+        bassBoost = null
+        exoPlayer?.release()
+        exoPlayer = null
+        try { appContext?.unregisterReceiver(noisyReceiver) } catch (_: Exception) {}
+        appContext?.let { MusicPlaybackService.stop(it) }
+        Log.d(TAG, "MusicPlayerManager fully released")
     }
 }

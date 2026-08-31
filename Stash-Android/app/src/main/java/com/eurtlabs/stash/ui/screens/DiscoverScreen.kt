@@ -30,11 +30,17 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DownloadDone
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Headphones
+import androidx.compose.material.icons.filled.Leaderboard
+import androidx.compose.material.icons.filled.NewReleases
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Whatshot
 import androidx.compose.material3.CircularProgressIndicator
@@ -62,10 +68,15 @@ import com.eurtlabs.stash.ui.components.AudioEqualizerVisualizer
 import com.eurtlabs.stash.ui.theme.LocalStashPalette
 import com.eurtlabs.stash.util.ArtworkUtils
 
+data class MoodStation(val title: String, val subtitle: String, val query: String, val gradientColors: List<Color>)
+data class FeaturedArtist(val name: String, val genre: String, val imageUrl: String)
+
 @Composable
 fun DiscoverScreen(
     quickPicks: List<SearchResultItem>,
     trendingHits: List<SearchResultItem>,
+    topCharts: List<SearchResultItem> = emptyList(),
+    newReleases: List<SearchResultItem> = emptyList(),
     isLoading: Boolean,
     selectedMood: String,
     activeDownloadsMap: Map<String, Float> = emptyMap(),
@@ -73,6 +84,7 @@ fun DiscoverScreen(
     onSelectMood: (String) -> Unit,
     onPlayTrack: (SearchResultItem, List<SearchResultItem>) -> Unit,
     onDownloadTrack: (SearchResultItem) -> Unit,
+    onSearchArtist: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val palette = LocalStashPalette.current
@@ -84,6 +96,22 @@ fun DiscoverScreen(
         "Electronic", "Acoustic", "Hip-Hop", "Indie"
     )
 
+    val moodStations = listOf(
+        MoodStation("Deep Focus", "Instrumental Beats", "Focus", listOf(Color(0xFF131C2E), Color(0xFF1E293B))),
+        MoodStation("Late Night Lo-Fi", "Chill & Study", "Lo-Fi", listOf(Color(0xFF1F172E), Color(0xFF2E2442))),
+        MoodStation("Workout Power", "High Energy Hype", "Workout", listOf(Color(0xFF2A1520), Color(0xFF3B1E2E))),
+        MoodStation("Party Wave", "Dance & Electronic", "Party", listOf(Color(0xFF2B1D12), Color(0xFF3D2A1C))),
+        MoodStation("Chill Acoustic", "Warm Vibes", "Acoustic", listOf(Color(0xFF12221A), Color(0xFF1B3327)))
+    )
+
+    val featuredArtists = listOf(
+        FeaturedArtist("The Weeknd", "R&B / Pop", "https://i.ytimg.com/vi/4NRXx6U8ABQ/hqdefault.jpg"),
+        FeaturedArtist("Ed Sheeran", "Pop / Acoustic", "https://i.ytimg.com/vi/JGwWNGJdvx8/hqdefault.jpg"),
+        FeaturedArtist("Taylor Swift", "Pop / Country", "https://i.ytimg.com/vi/kJQP7kiw5Fk/hqdefault.jpg"),
+        FeaturedArtist("Dua Lipa", "Dance Pop", "https://i.ytimg.com/vi/CevxZvSJLk8/hqdefault.jpg"),
+        FeaturedArtist("Lofi Girl", "Chill Lo-Fi", "https://i.ytimg.com/vi/jfKfPfyJRdk/hqdefault.jpg")
+    )
+
     if (quickPicks.isEmpty() && isLoading) {
         com.eurtlabs.stash.ui.components.DiscoverScreenSkeleton(modifier = modifier)
         return
@@ -93,7 +121,7 @@ fun DiscoverScreen(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(top = 8.dp, bottom = 140.dp)
     ) {
-        // Filter Chips Row
+        // Filter Chips Row (Mood Pills)
         item {
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 18.dp),
@@ -259,103 +287,290 @@ fun DiscoverScreen(
         }
 
         // Section: Quick Picks
+        if (quickPicks.isNotEmpty()) {
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AutoAwesome,
+                            contentDescription = null,
+                            tint = palette.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "QUICK PICKS",
+                            color = palette.textSecondary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.2.sp
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 18.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(quickPicks) { track ->
+                        val isPlaying = playerState.currentTrack?.id == track.id && playerState.isPlaying
+                        val downloadProgress = activeDownloadsMap[track.id]
+                        val isDownloaded = downloadedTrackIds.contains(track.id)
+
+                        QuickPickCard(
+                            track = track,
+                            isPlaying = isPlaying,
+                            downloadProgress = downloadProgress,
+                            isDownloaded = isDownloaded,
+                            onPlay = { onPlayTrack(track, quickPicks) },
+                            onDownload = { onDownloadTrack(track) }
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+        }
+
+        // Section: Mood & Energy Stations
         item {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.AutoAwesome,
-                        contentDescription = null,
-                        tint = palette.primary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Text(
-                        text = "QUICK PICKS",
-                        color = palette.textSecondary,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.2.sp
-                    )
-                }
+                Icon(
+                    imageVector = Icons.Default.Headphones,
+                    contentDescription = null,
+                    tint = palette.primary,
+                    modifier = Modifier.size(18.dp)
+                )
+                Text(
+                    text = "MOOD & ENERGY STATIONS",
+                    color = palette.textSecondary,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.2.sp
+                )
             }
             Spacer(modifier = Modifier.height(10.dp))
 
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 18.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                items(quickPicks) { track ->
-                    val isPlaying = playerState.currentTrack?.id == track.id && playerState.isPlaying
-                    val downloadProgress = activeDownloadsMap[track.id]
-                    val isDownloaded = downloadedTrackIds.contains(track.id)
-
-                    QuickPickCard(
-                        track = track,
-                        isPlaying = isPlaying,
-                        downloadProgress = downloadProgress,
-                        isDownloaded = isDownloaded,
-                        onPlay = { onPlayTrack(track, quickPicks) },
-                        onDownload = { onDownloadTrack(track) }
-                    )
+                items(moodStations) { station ->
+                    Box(
+                        modifier = Modifier
+                            .width(160.dp)
+                            .height(84.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(Brush.horizontalGradient(station.gradientColors))
+                            .border(1.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(18.dp))
+                            .clickable { onSelectMood(station.query) }
+                            .padding(12.dp),
+                        contentAlignment = Alignment.BottomStart
+                    ) {
+                        Column {
+                            Text(
+                                text = station.title,
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = station.subtitle,
+                                color = Color.White.copy(alpha = 0.8f),
+                                fontSize = 10.5.sp
+                            )
+                        }
+                    }
                 }
             }
             Spacer(modifier = Modifier.height(24.dp))
         }
 
-        // Section: Trending Now
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+        // Section: Top Charts Worldwide
+        val chartsToDisplay = topCharts.ifEmpty { trendingHits.take(6) }
+        if (chartsToDisplay.isNotEmpty()) {
+            item {
                 Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Whatshot,
+                        imageVector = Icons.Default.Leaderboard,
                         contentDescription = null,
                         tint = palette.primary,
                         modifier = Modifier.size(18.dp)
                     )
                     Text(
-                        text = "TRENDING NOW",
+                        text = "TOP CHARTS WORLDWIDE",
                         color = palette.textSecondary,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.2.sp
                     )
                 }
+                Spacer(modifier = Modifier.height(10.dp))
             }
-            Spacer(modifier = Modifier.height(10.dp))
+
+            itemsIndexed(chartsToDisplay) { index, track ->
+                val isPlaying = playerState.currentTrack?.id == track.id && playerState.isPlaying
+                val downloadProgress = activeDownloadsMap[track.id]
+                val isDownloaded = downloadedTrackIds.contains(track.id)
+
+                TrendingTrackRow(
+                    index = index + 1,
+                    track = track,
+                    isPlaying = isPlaying,
+                    downloadProgress = downloadProgress,
+                    isDownloaded = isDownloaded,
+                    onPlay = { onPlayTrack(track, chartsToDisplay) },
+                    onDownload = { onDownloadTrack(track) }
+                )
+            }
+            item { Spacer(modifier = Modifier.height(20.dp)) }
         }
 
-        itemsIndexed(trendingHits) { index, track ->
-            val isPlaying = playerState.currentTrack?.id == track.id && playerState.isPlaying
-            val downloadProgress = activeDownloadsMap[track.id]
-            val isDownloaded = downloadedTrackIds.contains(track.id)
+        // Section: New Releases
+        val releasesToDisplay = newReleases.ifEmpty { trendingHits.drop(6) }
+        if (releasesToDisplay.isNotEmpty()) {
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.NewReleases,
+                        contentDescription = null,
+                        tint = palette.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = "NEW RELEASES",
+                        color = palette.textSecondary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.2.sp
+                    )
+                }
+                Spacer(modifier = Modifier.height(10.dp))
 
-            TrendingTrackRow(
-                index = index + 1,
-                track = track,
-                isPlaying = isPlaying,
-                downloadProgress = downloadProgress,
-                isDownloaded = isDownloaded,
-                onPlay = { onPlayTrack(track, trendingHits) },
-                onDownload = { onDownloadTrack(track) }
-            )
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 18.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(releasesToDisplay) { track ->
+                        val isPlaying = playerState.currentTrack?.id == track.id && playerState.isPlaying
+                        val downloadProgress = activeDownloadsMap[track.id]
+                        val isDownloaded = downloadedTrackIds.contains(track.id)
+
+                        QuickPickCard(
+                            track = track,
+                            isPlaying = isPlaying,
+                            downloadProgress = downloadProgress,
+                            isDownloaded = isDownloaded,
+                            onPlay = { onPlayTrack(track, releasesToDisplay) },
+                            onDownload = { onDownloadTrack(track) }
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+        }
+
+        // Section: Featured Global Artists
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Person,
+                    contentDescription = null,
+                    tint = palette.primary,
+                    modifier = Modifier.size(18.dp)
+                )
+                Text(
+                    text = "FEATURED ARTISTS",
+                    color = palette.textSecondary,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.2.sp
+                )
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 18.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                items(featuredArtists) { artist ->
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .clickable { onSearchArtist(artist.name) }
+                            .width(86.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(72.dp)
+                                .clip(CircleShape)
+                                .background(palette.surfaceVariant)
+                                .border(1.2.dp, palette.primary.copy(alpha = 0.5f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            AsyncImage(
+                                model = artist.imageUrl,
+                                contentDescription = artist.name,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = artist.name,
+                            color = palette.textPrimary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = artist.genre,
+                            color = palette.textSecondary,
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -498,38 +713,34 @@ private fun TrendingTrackRow(
             .background(
                 Brush.verticalGradient(
                     if (isPlaying) listOf(palette.primary.copy(alpha = 0.16f), palette.surfaceVariant.copy(alpha = 0.90f))
-                    else listOf(palette.surfaceVariant.copy(alpha = 0.80f), palette.surface.copy(alpha = 0.60f))
+                    else listOf(palette.surfaceVariant.copy(alpha = 0.85f), palette.surface.copy(alpha = 0.65f))
                 )
             )
             .border(
                 1.dp,
-                Brush.verticalGradient(
-                    if (isPlaying) listOf(palette.primary.copy(alpha = 0.50f), Color.White.copy(alpha = 0.10f))
-                    else listOf(Color.White.copy(alpha = 0.20f), Color.White.copy(alpha = 0.04f))
-                ),
+                if (isPlaying) palette.primary.copy(alpha = 0.5f) else Color.White.copy(alpha = 0.08f),
                 RoundedCornerShape(18.dp)
             )
             .clickable(
                 interactionSource = remember(track.id) { MutableInteractionSource() },
                 indication = null
             ) { onPlay() }
-            .padding(10.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            text = index.toString(),
+            text = "%02d".format(index),
             color = rankColor,
             fontWeight = FontWeight.Black,
             fontSize = 14.sp,
-            modifier = Modifier.width(22.dp)
+            modifier = Modifier.width(26.dp)
         )
 
         Box(
             modifier = Modifier
                 .size(46.dp)
                 .clip(RoundedCornerShape(12.dp))
-                .background(palette.surfaceVariant),
-            contentAlignment = Alignment.Center
+                .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
         ) {
             AsyncImage(
                 model = artUrl,
@@ -541,10 +752,10 @@ private fun TrendingTrackRow(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.40f)),
+                        .background(Color.Black.copy(alpha = 0.45f)),
                     contentAlignment = Alignment.Center
                 ) {
-                    AudioEqualizerVisualizer(tint = palette.primary)
+                    AudioEqualizerVisualizer(tint = palette.primary, modifier = Modifier.size(16.dp))
                 }
             }
         }
@@ -556,7 +767,7 @@ private fun TrendingTrackRow(
                 text = track.title,
                 color = if (isPlaying) palette.primary else palette.textPrimary,
                 fontWeight = FontWeight.Bold,
-                fontSize = 13.5.sp,
+                fontSize = 13.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -570,6 +781,8 @@ private fun TrendingTrackRow(
             )
         }
 
+        Spacer(modifier = Modifier.width(8.dp))
+
         DownloadStatusWidget(
             progress = downloadProgress,
             isDownloaded = isDownloaded,
@@ -582,55 +795,81 @@ private fun TrendingTrackRow(
 fun DownloadStatusWidget(
     progress: Float?,
     isDownloaded: Boolean,
-    onDownload: () -> Unit,
-    modifier: Modifier = Modifier
+    onDownload: () -> Unit
 ) {
     val palette = LocalStashPalette.current
 
-    if (progress != null) {
-        // Active downloading ring with live percentage
+    if (isDownloaded) {
         Box(
-            modifier = modifier.size(32.dp),
-            contentAlignment = Alignment.Center
+            modifier = Modifier
+                .clip(RoundedCornerShape(14.dp))
+                .background(palette.primary.copy(alpha = 0.18f))
+                .border(1.dp, palette.primary.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
+                .padding(horizontal = 8.dp, vertical = 4.dp)
         ) {
-            CircularProgressIndicator(
-                progress = (progress / 100f).coerceIn(0.05f, 1f),
-                color = palette.primary,
-                trackColor = palette.primary.copy(alpha = 0.20f),
-                strokeWidth = 2.5.dp,
-                modifier = Modifier.size(28.dp)
-            )
-            Text(
-                text = "${progress.toInt()}%",
-                color = palette.primary,
-                fontSize = 8.sp,
-                fontWeight = FontWeight.Black
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = "Saved",
+                    tint = palette.primary,
+                    modifier = Modifier.size(13.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "SAVED",
+                    color = palette.primary,
+                    fontSize = 9.5.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 0.5.sp
+                )
+            }
         }
-    } else if (isDownloaded) {
-        // Downloaded Checkmark
+    } else if (progress != null) {
+        val pct = (progress * 100).toInt().coerceIn(0, 100)
         Box(
-            modifier = modifier.size(32.dp),
+            modifier = Modifier
+                .clip(RoundedCornerShape(14.dp))
+                .background(palette.surfaceVariant)
+                .border(1.dp, palette.primary.copy(alpha = 0.5f), RoundedCornerShape(14.dp))
+                .padding(horizontal = 7.dp, vertical = 3.dp),
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = Icons.Default.CheckCircle,
-                contentDescription = "Downloaded",
-                tint = palette.success,
-                modifier = Modifier.size(20.dp)
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier.size(12.dp),
+                    color = palette.primary,
+                    strokeWidth = 2.dp,
+                    trackColor = palette.primary.copy(alpha = 0.2f)
+                )
+                Spacer(modifier = Modifier.width(5.dp))
+                Text(
+                    text = "$pct%",
+                    color = palette.primary,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
     } else {
-        // Normal Download Button
-        IconButton(
-            onClick = onDownload,
-            modifier = modifier.size(32.dp)
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .background(
+                    brush = Brush.verticalGradient(
+                        listOf(palette.surfaceVariant, palette.surface)
+                    )
+                )
+                .border(1.dp, Color.White.copy(alpha = 0.20f), CircleShape)
+                .clickable { onDownload() },
+            contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = Icons.Default.Download,
-                contentDescription = "Download Song",
-                tint = palette.primary,
-                modifier = Modifier.size(20.dp)
+                contentDescription = "Download Track",
+                tint = palette.textSecondary,
+                modifier = Modifier.size(16.dp)
             )
         }
     }

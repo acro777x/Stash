@@ -70,6 +70,7 @@ import com.eurtlabs.stash.viewmodel.DownloadViewModel
 import android.webkit.WebSettings
 import com.eurtlabs.stash.data.downloader.YoutubeDLManager
 import com.eurtlabs.stash.data.downloader.CookieManager
+import com.eurtlabs.stash.player.MusicPlayerManager
 
 class MainActivity : ComponentActivity() {
 
@@ -135,9 +136,12 @@ class MainActivity : ComponentActivity() {
 
             val quickPicks by viewModel.quickPicks.collectAsState()
             val trendingHits by viewModel.trendingHits.collectAsState()
+            val topCharts by viewModel.topCharts.collectAsState()
+            val newReleases by viewModel.newReleases.collectAsState()
             val isDiscoverLoading by viewModel.isDiscoverLoading.collectAsState()
             val selectedDiscoverMood by viewModel.selectedDiscoverMood.collectAsState()
             val isSearching by viewModel.isSearching.collectAsState()
+            val searchQuery by viewModel.searchQuery.collectAsState()
             val searchResults by viewModel.searchResults.collectAsState()
             val searchFilter by viewModel.searchFilter.collectAsState()
             val showStorageDialog by viewModel.showStorageDialog.collectAsState()
@@ -226,6 +230,8 @@ class MainActivity : ComponentActivity() {
                                         DiscoverScreen(
                                             quickPicks = quickPicks,
                                             trendingHits = trendingHits,
+                                            topCharts = topCharts,
+                                            newReleases = newReleases,
                                             isLoading = isDiscoverLoading,
                                             selectedMood = selectedDiscoverMood,
                                             activeDownloadsMap = activeDownloadsMap,
@@ -234,11 +240,17 @@ class MainActivity : ComponentActivity() {
                                             onPlayTrack = { track, list -> viewModel.playOnlineTrack(track, list) },
                                             onDownloadTrack = { item ->
                                                 viewModel.enqueueTrackFromSearch(item)
+                                            },
+                                            onSearchArtist = { artistName ->
+                                                activeTabState = NavigationTab.SEARCH
+                                                viewModel.performSearch(artistName)
                                             }
                                         )
                                     }
                                     NavigationTab.SEARCH -> {
                                         SearchScreen(
+                                            searchQuery = searchQuery,
+                                            onSearchQueryChange = { viewModel.setSearchQuery(it) },
                                             isSearching = isSearching,
                                             searchResults = searchResults,
                                             selectedFilter = searchFilter,
@@ -329,7 +341,9 @@ class MainActivity : ComponentActivity() {
                         val activePlayerState by com.eurtlabs.stash.player.MusicPlayerManager.playerState.collectAsState()
                         val currentTrack = activePlayerState.currentTrack
                         val isTrackDownloaded = libraryBatches.flatMap { it.items }.any { it.trackInfo.id == currentTrack?.id && it.state == com.eurtlabs.stash.data.model.DownloadState.COMPLETED }
-                        val isTrackDownloading = batches.flatMap { it.items }.any { it.trackInfo.id == currentTrack?.id && (it.state == com.eurtlabs.stash.data.model.DownloadState.DOWNLOADING || it.state == com.eurtlabs.stash.data.model.DownloadState.QUEUED) }
+                        val activeDownloadingItem = batches.flatMap { it.items }.find { it.trackInfo.id == currentTrack?.id && (it.state == com.eurtlabs.stash.data.model.DownloadState.DOWNLOADING || it.state == com.eurtlabs.stash.data.model.DownloadState.QUEUED) }
+                        val isTrackDownloading = activeDownloadingItem != null
+                        val trackDownloadProgress = activeDownloadingItem?.progress ?: 0f
 
                         FullPlayerSheet(
                             onDismiss = { showFullPlayer = false },
@@ -347,7 +361,8 @@ class MainActivity : ComponentActivity() {
                                 viewModel.enqueueTrackFromSearch(searchItem)
                             },
                             isDownloaded = isTrackDownloaded,
-                            isDownloading = isTrackDownloading
+                            isDownloading = isTrackDownloading,
+                            downloadProgress = trackDownloadProgress
                         )
                     }
                 }
@@ -418,6 +433,23 @@ class MainActivity : ComponentActivity() {
                 viewModel.parseAndEnqueue(sharedText)
                 activeTabState = NavigationTab.QUEUE
             }
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        MusicPlayerManager.isAppInForeground = true
+    }
+
+    override fun onStop() {
+        super.onStop()
+        MusicPlayerManager.isAppInForeground = false
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        if (isFinishing) {
+            MusicPlayerManager.release()
         }
     }
 }

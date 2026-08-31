@@ -60,6 +60,8 @@ import com.eurtlabs.stash.ui.theme.LocalStashPalette
 
 @Composable
 fun SearchScreen(
+    searchQuery: String = "",
+    onSearchQueryChange: (String) -> Unit = {},
     isSearching: Boolean,
     searchResults: List<SearchResultItem>,
     selectedFilter: SearchFilter,
@@ -101,9 +103,12 @@ fun SearchScreen(
         // Search bar
         item {
             SearchInputBar(
+                query = searchQuery,
+                onQueryChange = onSearchQueryChange,
                 isFetching = isSearching,
                 fetchingMessage = "Searching YouTube & Music...",
-                onAnalyzeUrl = { query -> onSearch(query) }
+                onAnalyzeUrl = { query -> onSearch(query) },
+                onClearSearch = onClearSearch
             )
         }
 
@@ -120,6 +125,10 @@ fun SearchScreen(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(20.dp))
+                            .clickable(
+                                interactionSource = remember(filter) { MutableInteractionSource() },
+                                indication = null
+                            ) { onFilterChanged(filter) }
                             .background(
                                 if (isSelected) {
                                     Brush.verticalGradient(
@@ -139,10 +148,6 @@ fun SearchScreen(
                                 ),
                                 shape = RoundedCornerShape(20.dp)
                             )
-                            .clickable(
-                                interactionSource = remember(filter) { MutableInteractionSource() },
-                                indication = null
-                            ) { onFilterChanged(filter) }
                             .padding(horizontal = 16.dp, vertical = 8.dp),
                         contentAlignment = Alignment.Center
                     ) {

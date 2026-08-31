@@ -988,12 +988,20 @@ fun SettingsScreen(
                             fontSize = 10.5.sp
                         )
                     }
-                    Text(
-                        text = "Export 📤",
-                        color = palette.primary,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 11.5.sp
-                    )
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(palette.primary.copy(alpha = 0.15f))
+                            .border(0.8.dp, palette.primary.copy(alpha = 0.40f), RoundedCornerShape(10.dp))
+                            .padding(horizontal = 14.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = "Export",
+                            color = palette.primary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.5.sp
+                        )
+                    }
                 }
 
                 // Update Engine Action
@@ -1032,12 +1040,20 @@ fun SettingsScreen(
                             fontSize = 10.5.sp
                         )
                     }
-                    Text(
-                        text = if (isUpdating) "..." else "Update ↻",
-                        color = palette.primary,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 11.5.sp
-                    )
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(palette.primary.copy(alpha = 0.15f))
+                            .border(0.8.dp, palette.primary.copy(alpha = 0.40f), RoundedCornerShape(10.dp))
+                            .padding(horizontal = 14.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = if (isUpdating) "..." else "Update",
+                            color = palette.primary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.5.sp
+                        )
+                    }
                 }
 
                 // Check App Update Action
@@ -1119,12 +1135,20 @@ fun SettingsScreen(
                             fontSize = 10.5.sp
                         )
                     }
-                    Text(
-                        text = if (isCheckingAppUpdate) "..." else "Check",
-                        color = palette.primary,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 11.5.sp
-                    )
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(palette.primary.copy(alpha = 0.15f))
+                            .border(0.8.dp, palette.primary.copy(alpha = 0.40f), RoundedCornerShape(10.dp))
+                            .padding(horizontal = 14.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = if (isCheckingAppUpdate) "..." else "Check",
+                            color = palette.primary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.5.sp
+                        )
+                    }
                 }
 
                 // Clear Cache Storage Action
@@ -1171,12 +1195,20 @@ fun SettingsScreen(
                             fontSize = 10.5.sp
                         )
                     }
-                    Text(
-                        text = "Clear 🗑",
-                        color = palette.error,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 11.5.sp
-                    )
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(palette.error.copy(alpha = 0.12f))
+                            .border(0.8.dp, palette.error.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = "Clear Cache",
+                            color = palette.error,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.5.sp
+                        )
+                    }
                 }
             }
         }
@@ -1190,7 +1222,7 @@ fun SettingsScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Developed by @DhruvSaraswat",
+                    text = "Developed by Dhruv & Ashish",
                     color = palette.textSecondary.copy(alpha = 0.6f),
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Medium
