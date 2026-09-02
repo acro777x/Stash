@@ -281,6 +281,9 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
 
     fun setSearchFilter(filter: SearchFilter) {
         _searchFilter.value = filter
+        if (_searchQuery.value.isNotBlank()) {
+            performSearch(_searchQuery.value)
+        }
     }
 
     fun setSearchQuery(query: String) {
@@ -297,8 +300,13 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
                     val results = YoutubeLibraryFetcher.fetchLibrary(query.trim())
                     _searchResults.value = results
                 } else {
-                    val results = YoutubeDLManager.searchMedia(query.trim(), _searchFilter.value)
-                    _searchResults.value = results
+                    val fastResults = InnerTubeMusicRepository.search(query.trim(), _searchFilter.value)
+                    if (fastResults.isNotEmpty()) {
+                        _searchResults.value = fastResults
+                    } else {
+                        val results = YoutubeDLManager.searchMedia(query.trim(), _searchFilter.value)
+                        _searchResults.value = results
+                    }
                 }
             } catch (e: Exception) {
                 Log.e("DownloadViewModel", "Search error: ${e.message}", e)

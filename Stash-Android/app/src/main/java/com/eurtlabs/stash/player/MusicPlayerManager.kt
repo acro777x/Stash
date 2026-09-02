@@ -28,6 +28,7 @@ import com.eurtlabs.stash.data.model.PlaybackRepeatMode
 import com.eurtlabs.stash.data.model.SearchResultItem
 import com.eurtlabs.stash.data.model.TrackInfo
 import com.eurtlabs.stash.service.MusicPlaybackService
+import com.eurtlabs.stash.data.storage.TasteStore
 import com.eurtlabs.stash.util.ArtworkUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -102,6 +103,7 @@ object MusicPlayerManager {
     fun initialize(context: Context) {
         if (appContext != null) return
         appContext = context.applicationContext
+        TasteStore.initialize(context)
 
         val audioAttributes = AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
@@ -218,6 +220,7 @@ object MusicPlayerManager {
             MusicPlaybackService.start(ctx, track, isPlaying = true, positionMs = 0L, durationMs = track.durationMs)
         }
 
+        TasteStore.recordPlay(track.id, track.title, track.artists.firstOrNull() ?: "")
         fetchStudioArtworkForTrack(track)
         fetchLyricsForTrack(track)
         prefetchQueue(index)
@@ -666,7 +669,8 @@ object MusicPlayerManager {
             val lyricsResult = LyricsRepository.fetchLyrics(
                 trackTitle = track.title,
                 artistName = artist,
-                durationMs = track.durationMs
+                durationMs = track.durationMs,
+                videoId = track.id
             )
 
             withContext(Dispatchers.Main) {

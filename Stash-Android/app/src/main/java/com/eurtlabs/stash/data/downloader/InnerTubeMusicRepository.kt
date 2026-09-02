@@ -39,6 +39,10 @@ object InnerTubeMusicRepository {
     private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     private const val YOUTUBE_API_URL = "https://www.youtube.com/youtubei/v1"
 
+    // Dynamic Geolocation: Respect user's country (e.g. "IN" for India) so regional Indian music (Hindi, Haryanvi, Punjabi) ranks top
+    private val clientCountry: String
+        get() = java.util.Locale.getDefault().country.takeIf { it.isNotBlank() && it.length == 2 } ?: "IN"
+
     // Memory cache for stream URLs: videoId -> (url, timestamp) (capped at 100 for RAM efficiency)
     private val streamUrlCache = LruCache<String, Pair<String, Long>>(100)
     private const val CACHE_TTL_MS = 4 * 3600 * 1000L // 4 hours
@@ -324,7 +328,10 @@ object InnerTubeMusicRepository {
         }
     }
 
-    suspend fun search(query: String): List<SearchResultItem> = withContext(Dispatchers.IO) {
+    suspend fun search(
+        query: String,
+        filter: com.eurtlabs.stash.data.model.SearchFilter = com.eurtlabs.stash.data.model.SearchFilter.ALL
+    ): List<SearchResultItem> = withContext(Dispatchers.IO) {
         val results = mutableListOf<SearchResultItem>()
         try {
             val searchBody = JSONObject().apply {
@@ -333,10 +340,13 @@ object InnerTubeMusicRepository {
                         put("clientName", "WEB_REMIX")
                         put("clientVersion", "1.20240101.01.00")
                         put("hl", "en")
-                        put("gl", "US")
+                        put("gl", clientCountry)
                     })
                 })
                 put("query", query)
+                if (filter.params.isNotBlank()) {
+                    put("params", filter.params)
+                }
             }
 
             val request = Request.Builder()
@@ -395,7 +405,30 @@ object InnerTubeMusicRepository {
                                 ?: item.optJSONObject("doubleTapCommand")?.optJSONObject("watchEndpoint")?.optString("videoId", "")
                                 ?: ""
 
-                            if (title.isNotBlank() && videoId.isNotBlank()) {
+                            val browseId = item.optJSONObject("navigationEndpoint")
+                                ?.optJSONObject("browseEndpoint")?.optString("browseId", "") ?: ""
+
+                            val isArtistItem = filter == com.eurtlabs.stash.data.model.SearchFilter.ARTISTS || 
+                                browseId.startsWith("UC") || browseId.startsWith("FEmusic_library_corpus_artists") ||
+                                artist.equals("Artist", ignoreCase = true)
+
+                            if (isArtistItem && title.isNotBlank()) {
+                                val artistId = browseId.ifBlank { "artist_${title.hashCode()}" }
+                                results.add(
+                                    SearchResultItem(
+                                        id = artistId,
+                                        title = title,
+                                        artist = "Verified Artist",
+                                        durationText = "",
+                                        thumbnailUrl = thumbUrl,
+                                        url = if (browseId.isNotBlank()) "https://music.youtube.com/channel/$browseId" else "",
+                                        isAudio = false,
+                                        isArtist = true,
+                                        browseId = browseId,
+                                        subscriberCount = if (artist.contains("subscribers", ignoreCase = true)) artist else "Official Artist"
+                                    )
+                                )
+                            } else if (title.isNotBlank() && videoId.isNotBlank()) {
                                 results.add(
                                     SearchResultItem(
                                         id = videoId,
@@ -423,7 +456,7 @@ object InnerTubeMusicRepository {
         results
     }
 
-    suspend fun getTrendingHits(): List<SearchResultItem> = getQuickPicks()
+    suspend fun getTrendingHits(): List<SearchResultItem> = search("Top Trending Music Hits 2026", com.eurtlabs.stash.data.model.SearchFilter.MUSIC)
 
     suspend fun getMoodTracks(mood: String): List<SearchResultItem> = withContext(Dispatchers.IO) {
         val cleanMood = mood.replace(Regex("[^a-zA-Z0-9 ]"), "").trim()
@@ -439,25 +472,36 @@ object InnerTubeMusicRepository {
             moodTracksCache.put(cacheKey, preseeded)
         }
 
+        // Check if personalized "For You" is requested and user has played songs
+        if (cleanMood.equals("For You", ignoreCase = true) || cleanMood.equals("Top Hits", ignoreCase = true)) {
+            val lastId = com.eurtlabs.stash.data.storage.TasteStore.lastVideoId.value
+            if (!lastId.isNullOrBlank()) {
+                val related = getRelatedTracks(lastId)
+                if (related.isNotEmpty()) {
+                    moodTracksCache.put(cacheKey, related)
+                    return@withContext related
+                }
+            }
+        }
+
         val query = when (cacheKey) {
-            "top hits", "all" -> "Top Global Music Hits 2026"
+            "for you" -> "Top Trending Songs 2026"
+            "romantic hindi", "love songs" -> "Top Bollywood Romantic Love Songs 2026"
+            "haryanvi hits", "haryanvi" -> "Top Haryanvi Hits Songs 2026"
+            "bollywood hits", "bollywood" -> "Top Bollywood Music Hits 2026"
+            "punjabi beats", "punjabi" -> "Top Punjabi Music Hits 2026"
+            "hollywood pop", "hollywood" -> "Top Billboard Hot 100 Hits 2026"
+            "chill & lo-fi", "lo-fi", "lofi" -> "Lofi Chill Hip Hop Study Beats"
+            "party edm", "party", "energize" -> "High Energy Party Club Hits 2026"
+            "top hits", "all" -> "Top Trending Music Hits 2026"
             "relax" -> "Relaxing Acoustic Chill Ambient Music"
-            "energize" -> "High Energy Workout EDM Hits"
             "focus" -> "Lofi Focus Beats Study Relax"
             "workout" -> "Workout Motivation Gym EDM Pop"
             "commute" -> "Feel Good Indie Pop Car Drive"
-            "party" -> "Party Dance Pop Club Hits 2026"
-            "lo-fi", "lofi" -> "Lofi Hip Hop Chillhop Beats"
-            "pop" -> "Top Global Pop Music 2026"
-            "rock" -> "Top Modern Rock Alternative Hits"
-            "electronic" -> "Electronic Dance House EDM Hits"
-            "acoustic" -> "Acoustic Pop Guitar Chill"
-            "hip-hop", "hip hop" -> "Top Hip Hop and Rap Hits 2026"
-            "indie" -> "Top Indie Alternative Songs 2026"
-            else -> "$cleanMood popular music songs"
+            else -> "$cleanMood popular songs 2026"
         }
 
-        val fresh = search(query)
+        val fresh = search(query, com.eurtlabs.stash.data.model.SearchFilter.MUSIC)
         if (fresh.isNotEmpty()) {
             moodTracksCache.put(cacheKey, fresh)
             return@withContext fresh
@@ -466,7 +510,7 @@ object InnerTubeMusicRepository {
         return@withContext preseeded.ifEmpty { getFallbackTrending() }
     }
 
-    suspend fun getQuickPicks(): List<SearchResultItem> = getMoodTracks("Top Hits")
+    suspend fun getQuickPicks(): List<SearchResultItem> = getMoodTracks("For You")
 
     private fun getPreseededMoodTracks(mood: String): List<SearchResultItem> {
         return when (mood.lowercase()) {
@@ -574,4 +618,175 @@ object InnerTubeMusicRepository {
             SearchResultItem("YQHsXMglC9A", "Hello", "Adele", "4:55", "https://i.ytimg.com/vi/YQHsXMglC9A/hqdefault.jpg", "https://www.youtube.com/watch?v=YQHsXMglC9A", true)
         )
     }
+
+    /**
+     * Algorithmic Radio & Recommendations: Fetches 20-50 related tracks perfectly matched to the given song/vibe via RDAMVM.
+     */
+    suspend fun getRelatedTracks(videoId: String): List<SearchResultItem> = withContext(Dispatchers.IO) {
+        val cleanId = videoId.substringAfterLast("v=").substringAfterLast("/").trim()
+        if (cleanId.isBlank()) return@withContext emptyList()
+
+        val results = mutableListOf<SearchResultItem>()
+        try {
+            val reqBody = JSONObject().apply {
+                put("context", JSONObject().apply {
+                    put("client", JSONObject().apply {
+                        put("clientName", "WEB_REMIX")
+                        put("clientVersion", "1.20240101.01.00")
+                        put("hl", "en")
+                        put("gl", clientCountry)
+                    })
+                })
+                put("playlistId", "RDAMVM$cleanId")
+                put("isAudioOnly", true)
+            }
+
+            val request = Request.Builder()
+                .url("https://music.youtube.com/youtubei/v1/next")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                .header("Content-Type", "application/json")
+                .post(reqBody.toString().toRequestBody(JSON_MEDIA_TYPE))
+                .build()
+
+            val response = fastClient.newCall(request).execute()
+            val body = response.body?.string() ?: ""
+            if (body.isNotEmpty()) {
+                val json = JSONObject(body)
+                val tabs = json.optJSONObject("contents")
+                    ?.optJSONObject("singleColumnMusicWatchNextResultsRenderer")
+                    ?.optJSONObject("tabbedRenderer")
+                    ?.optJSONObject("watchNextTabbedResultsRenderer")
+                    ?.optJSONArray("tabs")
+
+                val queue = tabs?.optJSONObject(0)
+                    ?.optJSONObject("tabRenderer")
+                    ?.optJSONObject("content")
+                    ?.optJSONObject("musicQueueRenderer")
+                    ?.optJSONObject("content")
+                    ?.optJSONObject("playlistPanelRenderer")
+                    ?.optJSONArray("contents")
+
+                if (queue != null) {
+                    for (i in 0 until queue.length()) {
+                        val panel = queue.optJSONObject(i)?.optJSONObject("playlistPanelVideoRenderer") ?: continue
+                        val vId = panel.optString("videoId", "")
+                        val titleRuns = panel.optJSONObject("title")?.optJSONArray("runs")
+                        val title = titleRuns?.optJSONObject(0)?.optString("text", "") ?: ""
+                        val artistRuns = panel.optJSONObject("longBylineText")?.optJSONArray("runs")
+                        val artist = artistRuns?.optJSONObject(0)?.optString("text", "Unknown") ?: "Unknown"
+
+                        val thumbs = panel.optJSONObject("thumbnail")?.optJSONArray("thumbnails")
+                        val thumbUrl = if (thumbs != null && thumbs.length() > 0) {
+                            thumbs.optJSONObject(thumbs.length() - 1)?.optString("url", "")
+                        } else null
+
+                        if (vId.isNotBlank() && title.isNotBlank()) {
+                            results.add(
+                                SearchResultItem(
+                                    id = vId,
+                                    title = title,
+                                    artist = artist,
+                                    thumbnailUrl = thumbUrl,
+                                    url = "https://music.youtube.com/watch?v=$vId",
+                                    isAudio = true
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "getRelatedTracks error: ${e.message}")
+        }
+        results
+    }
+
+    /**
+     * Official YouTube Music Lyrics Extraction: Fetches exact lyrics from YouTube Music's native browse tab.
+     */
+    suspend fun getYouTubeMusicLyrics(videoId: String): String? = withContext(Dispatchers.IO) {
+        val cleanId = videoId.substringAfterLast("v=").substringAfterLast("/").trim()
+        if (cleanId.isBlank()) return@withContext null
+
+        try {
+            val reqBody = JSONObject().apply {
+                put("context", JSONObject().apply {
+                    put("client", JSONObject().apply {
+                        put("clientName", "WEB_REMIX")
+                        put("clientVersion", "1.20240101.01.00")
+                        put("hl", "en")
+                        put("gl", clientCountry)
+                    })
+                })
+                put("videoId", cleanId)
+            }
+
+            val request = Request.Builder()
+                .url("https://music.youtube.com/youtubei/v1/next")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                .header("Content-Type", "application/json")
+                .post(reqBody.toString().toRequestBody(JSON_MEDIA_TYPE))
+                .build()
+
+            val response = fastClient.newCall(request).execute()
+            val body = response.body?.string() ?: ""
+            if (body.isEmpty()) return@withContext null
+
+            val json = JSONObject(body)
+            val tabs = json.optJSONObject("contents")
+                ?.optJSONObject("singleColumnMusicWatchNextResultsRenderer")
+                ?.optJSONObject("tabbedRenderer")
+                ?.optJSONObject("watchNextTabbedResultsRenderer")
+                ?.optJSONArray("tabs") ?: return@withContext null
+
+            var lyricsBrowseId: String? = null
+            for (i in 0 until tabs.length()) {
+                val tabRenderer = tabs.optJSONObject(i)?.optJSONObject("tabRenderer") ?: continue
+                val endpoint = tabRenderer.optJSONObject("endpoint")?.optJSONObject("browseEndpoint")
+                val browseId = endpoint?.optString("browseId", "") ?: ""
+                if (browseId.startsWith("MPLY")) {
+                    lyricsBrowseId = browseId
+                    break
+                }
+            }
+
+            if (lyricsBrowseId.isNullOrBlank()) return@withContext null
+
+            val browseBody = JSONObject().apply {
+                put("context", JSONObject().apply {
+                    put("client", JSONObject().apply {
+                        put("clientName", "WEB_REMIX")
+                        put("clientVersion", "1.20240101.01.00")
+                        put("hl", "en")
+                        put("gl", clientCountry)
+                    })
+                })
+                put("browseId", lyricsBrowseId)
+            }
+
+            val browseReq = Request.Builder()
+                .url("https://music.youtube.com/youtubei/v1/browse")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                .header("Content-Type", "application/json")
+                .post(browseBody.toString().toRequestBody(JSON_MEDIA_TYPE))
+                .build()
+
+            val browseResp = fastClient.newCall(browseReq).execute()
+            val browseJson = JSONObject(browseResp.body?.string() ?: "")
+            val shelf = browseJson.optJSONObject("contents")
+                ?.optJSONObject("sectionListRenderer")
+                ?.optJSONArray("contents")
+                ?.optJSONObject(0)
+                ?.optJSONObject("musicDescriptionShelfRenderer")
+
+            val text = shelf?.optJSONObject("description")?.optJSONArray("runs")?.optJSONObject(0)?.optString("text", "")
+            if (!text.isNullOrBlank()) {
+                return@withContext text
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "getYouTubeMusicLyrics error: ${e.message}")
+        }
+        null
+    }
+
 }

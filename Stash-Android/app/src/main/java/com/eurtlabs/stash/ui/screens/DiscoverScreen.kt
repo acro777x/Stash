@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.eurtlabs.stash.data.model.SearchResultItem
+import com.eurtlabs.stash.data.storage.TasteStore
 import com.eurtlabs.stash.player.MusicPlayerManager
 import com.eurtlabs.stash.ui.components.AudioEqualizerVisualizer
 import com.eurtlabs.stash.ui.theme.LocalStashPalette
@@ -91,9 +92,8 @@ fun DiscoverScreen(
     val playerState by MusicPlayerManager.playerState.collectAsState()
 
     val moods = listOf(
-        "Top Hits", "Relax", "Energize", "Focus", "Workout",
-        "Commute", "Party", "Lo-Fi", "Pop", "Rock",
-        "Electronic", "Acoustic", "Hip-Hop", "Indie"
+        "For You", "Romantic Hindi", "Haryanvi Hits", "Bollywood", "Punjabi Beats", "Hollywood Pop",
+        "Chill & Lo-Fi", "Party EDM", "Relax", "Workout", "Acoustic"
     )
 
     val moodStations = listOf(
@@ -105,11 +105,12 @@ fun DiscoverScreen(
     )
 
     val featuredArtists = listOf(
+        FeaturedArtist("Dhanda Nyoliwala", "Haryanvi Hip-Hop", "https://i.ytimg.com/vi/qdk6d6YF5YI/hqdefault.jpg"),
+        FeaturedArtist("Arijit Singh", "Bollywood Romance", "https://i.ytimg.com/vi/kJQP7kiw5Fk/hqdefault.jpg"),
+        FeaturedArtist("Karan Aujla", "Punjabi Pop", "https://i.ytimg.com/vi/JGwWNGJdvx8/hqdefault.jpg"),
         FeaturedArtist("The Weeknd", "R&B / Pop", "https://i.ytimg.com/vi/4NRXx6U8ABQ/hqdefault.jpg"),
-        FeaturedArtist("Ed Sheeran", "Pop / Acoustic", "https://i.ytimg.com/vi/JGwWNGJdvx8/hqdefault.jpg"),
-        FeaturedArtist("Taylor Swift", "Pop / Country", "https://i.ytimg.com/vi/kJQP7kiw5Fk/hqdefault.jpg"),
-        FeaturedArtist("Dua Lipa", "Dance Pop", "https://i.ytimg.com/vi/CevxZvSJLk8/hqdefault.jpg"),
-        FeaturedArtist("Lofi Girl", "Chill Lo-Fi", "https://i.ytimg.com/vi/jfKfPfyJRdk/hqdefault.jpg")
+        FeaturedArtist("Shreya Ghoshal", "Melody & Love", "https://i.ytimg.com/vi/lp-EO5I60KA/hqdefault.jpg"),
+        FeaturedArtist("Taylor Swift", "Global Pop", "https://i.ytimg.com/vi/09R8_2nJtjg/hqdefault.jpg")
     )
 
     if (quickPicks.isEmpty() && isLoading) {
@@ -129,7 +130,7 @@ fun DiscoverScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 items(moods) { mood ->
-                    val isSelected = selectedMood.equals(mood, ignoreCase = true) || (mood == "Top Hits" && (selectedMood == "All" || selectedMood == "Top Hits"))
+                    val isSelected = selectedMood.equals(mood, ignoreCase = true) || (mood == "For You" && (selectedMood == "All" || selectedMood == "For You" || selectedMood == "Top Hits"))
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(20.dp))

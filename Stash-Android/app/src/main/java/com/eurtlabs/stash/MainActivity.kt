@@ -145,7 +145,10 @@ class MainActivity : ComponentActivity() {
             val searchResults by viewModel.searchResults.collectAsState()
             val searchFilter by viewModel.searchFilter.collectAsState()
             val showStorageDialog by viewModel.showStorageDialog.collectAsState()
+            val activeDownloadsMap by viewModel.activeDownloadsMap.collectAsState()
+            val downloadedTrackIds by viewModel.downloadedTrackIds.collectAsState()
             var showFullPlayer by androidx.compose.runtime.remember { mutableStateOf(false) }
+            var selectedArtistProfile by androidx.compose.runtime.remember { mutableStateOf<Pair<String, String?>?>(null) }
 
             val activeDownloadsCount = batches.flatMap { it.items }.count {
                 it.state == DownloadState.DOWNLOADING || it.state == DownloadState.CONVERTING || it.state == DownloadState.TAGGING
@@ -242,8 +245,7 @@ class MainActivity : ComponentActivity() {
                                                 viewModel.enqueueTrackFromSearch(item)
                                             },
                                             onSearchArtist = { artistName ->
-                                                activeTabState = NavigationTab.SEARCH
-                                                viewModel.performSearch(artistName)
+                                                selectedArtistProfile = Pair(artistName, null)
                                             }
                                         )
                                     }
@@ -265,6 +267,9 @@ class MainActivity : ComponentActivity() {
                                             },
                                             onDownloadAll = { items, artistName ->
                                                 viewModel.enqueueAllSearchResults(items, artistName)
+                                            },
+                                            onSelectArtist = { name, img ->
+                                                selectedArtistProfile = Pair(name, img)
                                             }
                                         )
                                     }
@@ -363,6 +368,19 @@ class MainActivity : ComponentActivity() {
                             isDownloaded = isTrackDownloaded,
                             isDownloading = isTrackDownloading,
                             downloadProgress = trackDownloadProgress
+                        )
+                    }
+
+                    if (selectedArtistProfile != null) {
+                        val (artistName, artistImg) = selectedArtistProfile!!
+                        com.eurtlabs.stash.ui.components.ArtistDetailSheet(
+                            artistName = artistName,
+                            artistImageUrl = artistImg,
+                            onDismiss = { selectedArtistProfile = null },
+                            onPlayTrack = { track, list -> viewModel.playOnlineTrack(track, list) },
+                            onDownloadTrack = { item -> viewModel.enqueueTrackFromSearch(item) },
+                            activeDownloadsMap = activeDownloadsMap,
+                            downloadedTrackIds = downloadedTrackIds
                         )
                     }
                 }

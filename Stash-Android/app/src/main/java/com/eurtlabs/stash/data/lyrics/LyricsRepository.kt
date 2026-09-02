@@ -2,6 +2,7 @@ package com.eurtlabs.stash.data.lyrics
 
 import android.util.Log
 import android.util.LruCache
+import com.eurtlabs.stash.data.downloader.InnerTubeMusicRepository
 import com.eurtlabs.stash.data.model.LyricLine
 import com.eurtlabs.stash.data.model.LyricsResult
 import kotlinx.coroutines.Dispatchers
@@ -34,11 +35,33 @@ object LyricsRepository {
     suspend fun fetchLyrics(
         trackTitle: String,
         artistName: String,
-        durationMs: Long = 0L
+        durationMs: Long = 0L,
+        videoId: String? = null
     ): LyricsResult? = withContext(Dispatchers.IO) {
         val cleanTitle = cleanSearchTerm(trackTitle)
         val cleanArtist = cleanArtistTerm(artistName)
         val cacheKey = "${cleanTitle.lowercase()}_${cleanArtist.lowercase()}"
+
+        // Tier 0: Official YouTube Music Lyrics directly from InnerTube browse endpoint
+        if (!videoId.isNullOrBlank()) {
+            try {
+                val ytLyrics = InnerTubeMusicRepository.getYouTubeMusicLyrics(videoId)
+                if (!ytLyrics.isNullOrBlank()) {
+                    val lrclib = fetchFromLrclib(cleanTitle, cleanArtist, durationMs)
+                    val result = LyricsResult(
+                        trackName = trackTitle,
+                        artistName = artistName,
+                        plainLyrics = ytLyrics,
+                        syncedLyrics = lrclib?.syncedLyrics ?: emptyList(),
+                        source = if (lrclib?.syncedLyrics?.isNotEmpty() == true) "Synchronized • Official" else "YouTube Music (Official)"
+                    )
+                    lyricsMemoryCache.put(cacheKey, result)
+                    return@withContext result
+                }
+            } catch (e: Exception) {
+                // Fallback to following tiers
+            }
+        }
 
         // Check 0ms in-memory cache
         lyricsMemoryCache.get(cacheKey)?.let { cached ->

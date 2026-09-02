@@ -27,6 +27,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DownloadDone
@@ -73,6 +74,7 @@ fun SearchScreen(
     onPlayTrack: (SearchResultItem, List<SearchResultItem>) -> Unit = { _, _ -> },
     onDownloadItem: (SearchResultItem) -> Unit,
     onDownloadAll: (List<SearchResultItem>, String) -> Unit = { _, _ -> },
+    onSelectArtist: (String, String?) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     val palette = LocalStashPalette.current
@@ -80,13 +82,13 @@ fun SearchScreen(
     val playerState by MusicPlayerManager.playerState.collectAsState()
 
     val quickSearches = listOf(
+        "Dhanda Nyoliwala",
+        "Arijit Singh",
+        "Karan Aujla",
         "The Weeknd",
-        "Daft Punk",
-        "Coldplay",
-        "Billie Eilish",
+        "Shreya Ghoshal",
         "Taylor Swift",
-        "Travis Scott",
-        "Eminem",
+        "Sidhu Moose Wala",
         "Lofi Hip Hop"
     )
 
@@ -190,8 +192,15 @@ fun SearchScreen(
                     isPlaying = isPlaying,
                     downloadProgress = downloadProgress,
                     isDownloaded = isDownloaded,
-                    onPlay = { onPlayTrack(resultItem, searchResults) },
-                    onDownload = { onDownloadItem(resultItem) }
+                    onPlay = { 
+                        if (resultItem.isArtist) {
+                            onSelectArtist(resultItem.title, resultItem.thumbnailUrl)
+                        } else {
+                            onPlayTrack(resultItem, searchResults)
+                        }
+                    },
+                    onDownload = { onDownloadItem(resultItem) },
+                    onSelectArtist = onSelectArtist
                 )
             }
         } else {
@@ -306,9 +315,95 @@ private fun SearchResultCard(
     downloadProgress: Float?,
     isDownloaded: Boolean,
     onPlay: () -> Unit,
-    onDownload: () -> Unit
+    onDownload: () -> Unit,
+    onSelectArtist: (String, String?) -> Unit = { _, _ -> }
 ) {
     val palette = LocalStashPalette.current
+
+    if (item.isArtist) {
+        // Special Verified Artist Card
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp, vertical = 5.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(
+                    Brush.horizontalGradient(
+                        listOf(palette.surfaceVariant.copy(alpha = 0.85f), palette.surface.copy(alpha = 0.65f))
+                    )
+                )
+                .border(
+                    1.dp,
+                    Brush.horizontalGradient(listOf(palette.primary.copy(alpha = 0.45f), Color.White.copy(alpha = 0.08f))),
+                    RoundedCornerShape(20.dp)
+                )
+                .clickable { onSelectArtist(item.title, item.thumbnailUrl) }
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(54.dp)
+                    .clip(CircleShape)
+                    .background(palette.surfaceVariant)
+                    .border(1.5.dp, palette.primary, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                AsyncImage(
+                    model = item.thumbnailUrl,
+                    contentDescription = item.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            Spacer(modifier = Modifier.width(14.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = item.title,
+                        color = palette.textPrimary,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.5.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.width(5.dp))
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = "Verified",
+                        tint = palette.primary,
+                        modifier = Modifier.size(15.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = item.subscriberCount.ifBlank { "Verified Artist" },
+                    fontSize = 11.5.sp,
+                    color = palette.textSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(palette.primary.copy(alpha = 0.15f))
+                    .border(1.dp, palette.primary.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Text(
+                    text = "View Profile",
+                    color = palette.primary,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+        return
+    }
 
     Row(
         modifier = Modifier
@@ -401,7 +496,8 @@ private fun SearchResultCard(
                 fontSize = 11.5.sp,
                 color = palette.textSecondary,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.clickable { onSelectArtist(item.artist, null) }
             )
         }
 
