@@ -1160,6 +1160,7 @@ fun SettingsScreen(
                         .clickable {
                             scope.launch(kotlinx.coroutines.Dispatchers.IO) {
                                 try {
+                                    com.eurtlabs.stash.player.MusicPlayerManager.clearMediaCache()
                                     context.cacheDir.deleteRecursively()
                                     context.cacheDir.mkdirs() // Recreate the directory just in case
                                     

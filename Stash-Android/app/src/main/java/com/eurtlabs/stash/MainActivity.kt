@@ -131,6 +131,11 @@ class MainActivity : ComponentActivity() {
             val settings by viewModel.settings.collectAsState()
             val batches by viewModel.queueBatches.collectAsState()
             val libraryBatches by viewModel.libraryBatches.collectAsState()
+            androidx.compose.runtime.LaunchedEffect(libraryBatches) {
+                MusicPlayerManager.localLibraryItems = libraryBatches.flatMap { it.items }.filter {
+                    it.state == DownloadState.COMPLETED && !it.finalFilePath.isNullOrBlank()
+                }
+            }
             val isFetching by viewModel.isFetching.collectAsState()
             val fetchingMessage by viewModel.fetchingMessage.collectAsState()
 
@@ -379,6 +384,7 @@ class MainActivity : ComponentActivity() {
                             onDismiss = { selectedArtistProfile = null },
                             onPlayTrack = { track, list -> viewModel.playOnlineTrack(track, list) },
                             onDownloadTrack = { item -> viewModel.enqueueTrackFromSearch(item) },
+                            onExpandPlayer = { showFullPlayer = true },
                             activeDownloadsMap = activeDownloadsMap,
                             downloadedTrackIds = downloadedTrackIds
                         )

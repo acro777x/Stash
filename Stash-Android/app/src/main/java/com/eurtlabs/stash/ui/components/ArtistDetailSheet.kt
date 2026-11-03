@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Radio
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -79,6 +80,7 @@ fun ArtistDetailSheet(
     onDismiss: () -> Unit,
     onPlayTrack: (SearchResultItem, List<SearchResultItem>) -> Unit,
     onDownloadTrack: (SearchResultItem) -> Unit,
+    onExpandPlayer: () -> Unit = {},
     activeDownloadsMap: Map<String, Float> = emptyMap(),
     downloadedTrackIds: Set<String> = emptySet()
 ) {
@@ -174,32 +176,43 @@ fun ArtistDetailSheet(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // Artist Header Section
-                Row(
+                // Grand Immersive Artist Header Section
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(24.dp))
+                        .clip(RoundedCornerShape(28.dp))
                         .background(
                             Brush.verticalGradient(
-                                listOf(palette.surfaceVariant.copy(alpha = 0.85f), palette.surface.copy(alpha = 0.60f))
+                                listOf(
+                                    palette.surfaceVariant.copy(alpha = 0.95f),
+                                    palette.surface.copy(alpha = 0.80f)
+                                )
                             )
                         )
                         .border(
-                            1.dp,
-                            Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.35f), Color.White.copy(alpha = 0.05f))),
-                            RoundedCornerShape(24.dp)
+                            1.5.dp,
+                            Brush.verticalGradient(
+                                listOf(Color.White.copy(alpha = 0.40f), palette.primary.copy(alpha = 0.20f), Color.White.copy(alpha = 0.05f))
+                            ),
+                            RoundedCornerShape(28.dp)
                         )
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(vertical = 22.dp, horizontal = 18.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // Circular Avatar
+                    // Bigger 140dp Circular Avatar with Multi-layer Glowing Ring
                     val avatarUrl = artistImageUrl ?: topSongs.firstOrNull()?.thumbnailUrl
                     Box(
                         modifier = Modifier
-                            .size(76.dp)
+                            .size(140.dp)
                             .clip(CircleShape)
                             .background(palette.surfaceVariant)
-                            .border(1.5.dp, palette.primary, CircleShape),
+                            .border(
+                                width = 3.5.dp,
+                                brush = Brush.sweepGradient(
+                                    listOf(palette.primary, Color(0xFFFF1493), Color(0xFFFF69B4), palette.primary)
+                                ),
+                                shape = CircleShape
+                            ),
                         contentAlignment = Alignment.Center
                     ) {
                         if (!avatarUrl.isNullOrBlank()) {
@@ -210,63 +223,142 @@ fun ArtistDetailSheet(
                                 modifier = Modifier.fillMaxSize()
                             )
                         } else {
-                            Icon(Icons.Default.Person, contentDescription = null, tint = palette.textSecondary, modifier = Modifier.size(36.dp))
+                            Icon(
+                                Icons.Default.Person,
+                                contentDescription = null,
+                                tint = palette.textSecondary,
+                                modifier = Modifier.size(68.dp)
+                            )
                         }
                     }
 
-                    Spacer(modifier = Modifier.width(16.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
 
-                    Column(modifier = Modifier.weight(1f)) {
+                    // Verified Badge Pill
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(palette.primary.copy(alpha = 0.18f))
+                            .border(1.2.dp, palette.primary.copy(alpha = 0.50f), RoundedCornerShape(16.dp))
+                            .padding(horizontal = 12.dp, vertical = 4.dp)
+                    ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = artistName,
-                                color = palette.textPrimary,
-                                fontSize = 19.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
                             Icon(
                                 imageVector = Icons.Default.CheckCircle,
                                 contentDescription = "Verified",
                                 tint = palette.primary,
-                                modifier = Modifier.size(17.dp)
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "VERIFIED OFFICIAL ARTIST",
+                                color = palette.primary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                letterSpacing = 0.9.sp
                             )
                         }
+                    }
 
-                        Spacer(modifier = Modifier.height(3.dp))
-                        Text(
-                            text = "Verified Official Artist",
-                            color = palette.textSecondary,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium
-                        )
+                    Spacer(modifier = Modifier.height(10.dp))
 
-                        Spacer(modifier = Modifier.height(8.dp))
+                    // Bold Artist Name
+                    Text(
+                        text = artistName,
+                        color = palette.textPrimary,
+                        fontSize = 26.sp,
+                        fontWeight = FontWeight.Black,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
 
-                        // Play Radio Action Pill
+                    Spacer(modifier = Modifier.height(5.dp))
+
+                    // Audience Subtitle
+                    Text(
+                        text = "Global Discography • Verified Top Hits & Singles",
+                        color = palette.textSecondary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Dual Action Buttons: Play Radio & Shuffle All
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Play Radio Button
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(20.dp))
+                                .weight(1f)
+                                .clip(RoundedCornerShape(22.dp))
                                 .background(palette.primary)
                                 .clickable {
                                     if (topSongs.isNotEmpty()) {
                                         onPlayTrack(topSongs.first(), topSongs)
                                     }
                                 }
-                                .padding(horizontal = 14.dp, vertical = 6.dp)
+                                .padding(vertical = 12.dp),
+                            contentAlignment = Alignment.Center
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = palette.onPrimary, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Play Radio", color = palette.onPrimary, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = null,
+                                    tint = palette.onPrimary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Play Radio",
+                                    color = palette.onPrimary,
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        // Shuffle All Button
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(22.dp))
+                                .background(palette.surfaceVariant)
+                                .border(1.2.dp, Color.White.copy(alpha = 0.30f), RoundedCornerShape(22.dp))
+                                .clickable {
+                                    if (topSongs.isNotEmpty()) {
+                                        val shuffled = topSongs.shuffled()
+                                        onPlayTrack(shuffled.first(), shuffled)
+                                    }
+                                }
+                                .padding(vertical = 12.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Shuffle,
+                                    contentDescription = null,
+                                    tint = palette.textPrimary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Shuffle All",
+                                    color = palette.textPrimary,
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(18.dp))
+                Spacer(modifier = Modifier.height(20.dp))
 
                 Text(
                     text = "TOP DISCOGRAPHY & SONGS (${topSongs.size})",
@@ -288,7 +380,7 @@ fun ArtistDetailSheet(
                 } else {
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(bottom = 30.dp)
+                        contentPadding = PaddingValues(bottom = if (playerState.currentTrack != null) 115.dp else 32.dp)
                     ) {
                         itemsIndexed(topSongs, key = { _, item -> item.id }) { index, item ->
                             val isCurrentTrackPlaying = playerState.currentTrack?.id == item.id && playerState.isPlaying
@@ -385,6 +477,21 @@ fun ArtistDetailSheet(
                             }
                         }
                     }
+                }
+            }
+
+            // Docked Mini-Player Window at Bottom of Artist Section
+            if (playerState.currentTrack != null) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .navigationBarsPadding()
+                        .padding(horizontal = 14.dp, vertical = 6.dp)
+                ) {
+                    MiniPlayerBar(
+                        onExpandPlayer = onExpandPlayer,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
             }
         }

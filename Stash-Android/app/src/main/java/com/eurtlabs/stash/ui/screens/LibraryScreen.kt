@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shuffle
@@ -330,25 +331,44 @@ fun LibraryScreen(
 
                         Spacer(modifier = Modifier.height(14.dp))
 
+                        val isThisPlaylistActive = playerState.isPlaying && playlist.tracks.any { it.id == playerState.currentTrack?.id }
+                        val isThisPlaylistLoaded = playlist.tracks.any { it.id == playerState.currentTrack?.id }
+
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Play All
+                            // Play / Pause / Resume All
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(16.dp))
                                     .background(palette.primary)
                                     .clickable(enabled = playlist.tracks.isNotEmpty()) {
-                                        MusicPlayerManager.playQueue(playlist.tracks, 0)
+                                        if (isThisPlaylistActive) {
+                                            MusicPlayerManager.pause()
+                                        } else if (isThisPlaylistLoaded) {
+                                            MusicPlayerManager.play()
+                                        } else {
+                                            MusicPlayerManager.playQueue(playlist.tracks, 0)
+                                        }
                                     }
                                     .padding(horizontal = 16.dp, vertical = 9.dp)
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.PlayArrow, contentDescription = null, tint = palette.onPrimary, modifier = Modifier.size(16.dp))
+                                    Icon(
+                                        imageVector = if (isThisPlaylistActive) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                        contentDescription = if (isThisPlaylistActive) "Pause" else "Play All",
+                                        tint = palette.onPrimary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Play All", color = palette.onPrimary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    Text(
+                                        text = if (isThisPlaylistActive) "Pause" else if (isThisPlaylistLoaded) "Resume" else "Play All",
+                                        color = palette.onPrimary,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp
+                                    )
                                 }
                             }
 
@@ -396,7 +416,7 @@ fun LibraryScreen(
                 }
             } else {
                 itemsIndexed(playlist.tracks) { index, track ->
-                    val isPlaying = playerState.currentTrack?.id == track.id
+                    val isPlaying = playerState.currentTrack?.id == track.id && playerState.isPlaying
                     TrackRowItem(
                         track = track,
                         isPlaying = isPlaying,
@@ -684,7 +704,7 @@ fun LibraryScreen(
                     }
                 } else {
                     items(completedItems) { item ->
-                        val isPlaying = playerState.currentTrack?.id == item.trackInfo.id
+                        val isPlaying = playerState.isPlaying && playerState.currentTrack?.id == item.trackInfo.id
                         LibraryTrackRow(
                             item = item,
                             isPlaying = isPlaying,
@@ -741,16 +761,30 @@ fun LibraryScreen(
 
                             if (likedTracks.isNotEmpty()) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    // Play All
+                                    // Play / Pause All
+                                    val isLikedPlaying = playerState.isPlaying && playerState.currentTrack != null && likedTracks.any { it.id == playerState.currentTrack?.id }
                                     Box(
                                         modifier = Modifier
                                             .size(42.dp)
                                             .clip(CircleShape)
                                             .background(palette.primary)
-                                            .clickable { MusicPlayerManager.playQueue(likedTracks, 0) },
+                                            .clickable { 
+                                                if (isLikedPlaying) {
+                                                    MusicPlayerManager.pause()
+                                                } else if (playerState.currentTrack != null && likedTracks.any { it.id == playerState.currentTrack?.id }) {
+                                                    MusicPlayerManager.play()
+                                                } else {
+                                                    MusicPlayerManager.playQueue(likedTracks, 0)
+                                                }
+                                            },
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Icon(Icons.Default.PlayArrow, contentDescription = "Play All", tint = palette.onPrimary, modifier = Modifier.size(22.dp))
+                                        Icon(
+                                            imageVector = if (isLikedPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                            contentDescription = if (isLikedPlaying) "Pause" else "Play All",
+                                            tint = palette.onPrimary,
+                                            modifier = Modifier.size(22.dp)
+                                        )
                                     }
 
                                     // Shuffle
@@ -793,7 +827,7 @@ fun LibraryScreen(
                     }
                 } else {
                     itemsIndexed(likedTracks) { index, track ->
-                        val isPlaying = playerState.currentTrack?.id == track.id
+                        val isPlaying = playerState.isPlaying && playerState.currentTrack?.id == track.id
                         TrackRowItem(
                             track = track,
                             isPlaying = isPlaying,

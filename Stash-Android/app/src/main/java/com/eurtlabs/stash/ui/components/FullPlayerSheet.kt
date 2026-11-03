@@ -1,5 +1,6 @@
 package com.eurtlabs.stash.ui.components
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -11,10 +12,13 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -90,7 +94,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -119,9 +125,8 @@ data class TikTokHeart(
     val id: Long = System.currentTimeMillis() + (0..9999).random(),
     val x: Float,
     val y: Float,
-    val color: Color,
-    val rotation: Float = ((-15..15).random()).toFloat(),
-    val size: Dp = (30..40).random().dp
+    val color: Color = Color(0xFFFF1493),
+    val size: Dp = 115.dp
 )
 
 @Composable
@@ -129,46 +134,118 @@ fun TikTokPopHeart(
     heart: TikTokHeart,
     onFinished: () -> Unit
 ) {
-    val animProgress = remember { Animatable(0f) }
+    val scaleAnim = remember { Animatable(0.15f) }
+    val alphaAnim = remember { Animatable(1f) }
+    val floatAnim = remember { Animatable(0f) }
 
     LaunchedEffect(heart.id) {
-        animProgress.animateTo(
-            targetValue = 1f,
-            animationSpec = tween(durationMillis = 500, easing = FastOutSlowInEasing)
-        )
-        onFinished()
+        // Snappy spring pop
+        launch {
+            scaleAnim.animateTo(
+                targetValue = 1.25f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                    stiffness = Spring.StiffnessMedium
+                )
+            )
+            scaleAnim.animateTo(
+                targetValue = 1.0f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessLow
+                )
+            )
+        }
+        // Gentle float upwards
+        launch {
+            floatAnim.animateTo(
+                targetValue = -90f,
+                animationSpec = tween(durationMillis = 750, easing = FastOutSlowInEasing)
+            )
+        }
+        // Alpha holds solid then smoothly fades away
+        launch {
+            delay(420)
+            alphaAnim.animateTo(
+                targetValue = 0f,
+                animationSpec = tween(durationMillis = 330, easing = LinearEasing)
+            )
+            onFinished()
+        }
     }
 
-    val progress = animProgress.value
-    val scale = if (progress < 0.5f) {
-        (progress / 0.5f) * 1.35f
-    } else {
-        1.35f - ((progress - 0.5f) / 0.5f) * 0.35f
-    }
-
-    val alpha = if (progress < 0.7f) 1f else (1f - (progress - 0.7f) / 0.3f).coerceIn(0f, 1f)
-    val floatOffsetY = -progress * 75f
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val halfSizePx = with(density) { (heart.size / 2).toPx() }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        Icon(
-            imageVector = Icons.Default.Favorite,
-            contentDescription = null,
-            tint = heart.color,
+        Box(
             modifier = Modifier
                 .offset {
                     IntOffset(
-                        x = (heart.x - 40).toInt(),
-                        y = (heart.y - 40 + floatOffsetY).toInt()
+                        x = (heart.x - halfSizePx).toInt(),
+                        y = (heart.y - halfSizePx + floatAnim.value).toInt()
                     )
                 }
-                .graphicsLayer {
-                    scaleX = scale
-                    scaleY = scale
-                    this.alpha = alpha
-                    rotationZ = heart.rotation
-                }
-                .size(heart.size)
-        )
+                .size(heart.size),
+            contentAlignment = Alignment.Center
+        ) {
+            // Radiant Pink Glow Halo Aura
+            Box(
+                modifier = Modifier
+                    .size(heart.size * 1.55f)
+                    .graphicsLayer {
+                        scaleX = scaleAnim.value * 1.15f
+                        scaleY = scaleAnim.value * 1.15f
+                        this.alpha = alphaAnim.value * 0.65f
+                    }
+                    .background(
+                        brush = Brush.radialGradient(
+                            listOf(
+                                heart.color.copy(alpha = 0.70f),
+                                Color(0xFFFF69B4).copy(alpha = 0.30f),
+                                Color.Transparent
+                            )
+                        ),
+                        shape = CircleShape
+                    )
+            )
+
+            // 4 Micro Sparkle Stars (✦) expanding outward symmetrically
+            val sparkleOffsets = listOf(
+                IntOffset(-42, -42),
+                IntOffset(42, -42),
+                IntOffset(-42, 42),
+                IntOffset(42, 42)
+            )
+            sparkleOffsets.forEach { offset ->
+                Box(
+                    modifier = Modifier
+                        .offset {
+                            IntOffset(
+                                (offset.x * (scaleAnim.value - 0.2f)).toInt(),
+                                (offset.y * (scaleAnim.value - 0.2f)).toInt()
+                            )
+                        }
+                        .size(9.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = alphaAnim.value * 0.9f))
+                )
+            }
+
+            // Big Bold Hero Pink Heart
+            Icon(
+                imageVector = Icons.Default.Favorite,
+                contentDescription = null,
+                tint = heart.color,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        scaleX = scaleAnim.value
+                        scaleY = scaleAnim.value
+                        this.alpha = alphaAnim.value
+                    }
+            )
+        }
     }
 }
 
@@ -195,6 +272,16 @@ fun FullPlayerSheet(
 
     val highResArt = ArtworkUtils.getHighResArtworkUrl(track?.albumArtUrl, track?.id)
     val isLocalSong = !playerState.isStreaming || isDownloaded || playerState.currentItem != null
+
+    BackHandler(enabled = true) {
+        coroutineScope.launch {
+            try {
+                sheetState.hide()
+            } finally {
+                onDismiss()
+            }
+        }
+    }
 
     if (showDeleteConfirmDialog && track != null) {
         LiquidGlassConfirmDialog(
@@ -268,7 +355,15 @@ fun FullPlayerSheet(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(
-                        onClick = onDismiss,
+                        onClick = {
+                            coroutineScope.launch {
+                                try {
+                                    sheetState.hide()
+                                } finally {
+                                    onDismiss()
+                                }
+                            }
+                        },
                         modifier = Modifier.size(40.dp)
                     ) {
                         Icon(
@@ -487,19 +582,6 @@ private fun NowPlayingView(
     val palette = LocalStashPalette.current
     val haptic = LocalHapticFeedback.current
     var heartBursts by remember { mutableStateOf<List<TikTokHeart>>(emptyList()) }
-    var lastTapTime by remember { mutableStateOf(0L) }
-    val gistColors = remember {
-        listOf(
-            Color(0xFFFF2D55),
-            Color(0xFFFF6666),
-            Color(0xFFFF66FF),
-            Color(0xFF6666FF),
-            Color(0xFF66FFFF),
-            Color(0xFF66FF66),
-            Color(0xFFFFFF66),
-            Color(0xFFFF9966)
-        )
-    }
 
     val currentMs = if (isDraggingSlider) sliderTempPos.toLong() else playerState.currentPositionMs
     val durationMs = if (playerState.durationMs > 0) playerState.durationMs else 1L
@@ -534,33 +616,18 @@ private fun NowPlayingView(
                     )
                     .pointerInput(track?.id) {
                         detectTapGestures(
-                            onTap = { offset ->
-                                val now = System.currentTimeMillis()
-                                if (now - lastTapTime < 600) {
-                                    if (track != null && !PlaylistStore.isLiked(track.id)) {
-                                        PlaylistStore.toggleLike(track)
-                                    }
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    val newHeart = TikTokHeart(
-                                        x = offset.x,
-                                        y = offset.y,
-                                        color = gistColors.random()
-                                    )
-                                    heartBursts = heartBursts + newHeart
-                                }
-                                lastTapTime = now
-                            },
                             onDoubleTap = { offset ->
                                 if (track != null && !PlaylistStore.isLiked(track.id)) {
                                     PlaylistStore.toggleLike(track)
                                 }
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                val newHeart = TikTokHeart(
+                                val hero = TikTokHeart(
                                     x = offset.x,
                                     y = offset.y,
-                                    color = gistColors.random()
+                                    color = Color(0xFFFF1493),
+                                    size = 135.dp
                                 )
-                                heartBursts = heartBursts + newHeart
+                                heartBursts = heartBursts + hero
                             }
                         )
                     },
@@ -1002,7 +1069,8 @@ private fun SyncedLyricsView(
     }
 
     if (playerState.syncedLyrics.isNotEmpty()) {
-        val activeIndex = playerState.syncedLyrics.indexOfLast { it.timestampMs <= currentMs }.takeIf { it >= 0 } ?: 0
+        val effectiveLyricsMs = currentMs + 1200L
+        val activeIndex = playerState.syncedLyrics.indexOfLast { it.timestampMs <= effectiveLyricsMs }.takeIf { it >= 0 } ?: 0
 
         LaunchedEffect(activeIndex) {
             if (activeIndex in playerState.syncedLyrics.indices) {
@@ -1012,21 +1080,44 @@ private fun SyncedLyricsView(
 
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(vertical = 30.dp)
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer(alpha = 0.99f)
+                .drawWithContent {
+                    drawContent()
+                    // Top fade mask
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(Color.Transparent, Color.Black),
+                            startY = 0f,
+                            endY = 32.dp.toPx()
+                        ),
+                        blendMode = BlendMode.DstIn
+                    )
+                    // Bottom fade mask
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(Color.Black, Color.Transparent),
+                            startY = size.height - 32.dp.toPx(),
+                            endY = size.height
+                        ),
+                        blendMode = BlendMode.DstIn
+                    )
+                },
+            contentPadding = PaddingValues(vertical = 36.dp)
         ) {
             itemsIndexed(playerState.syncedLyrics) { index, line ->
                 val isActive = index == activeIndex
-                val isPast = line.timestampMs < currentMs && !isActive
+                val isPast = line.timestampMs < effectiveLyricsMs && !isActive
 
                 val textColor by animateColorAsState(
-                    targetValue = if (isActive) palette.primary else if (isPast) palette.textSecondary.copy(alpha = 0.45f) else palette.textSecondary.copy(alpha = 0.75f),
+                    targetValue = if (isActive) palette.primary else if (isPast) palette.textSecondary.copy(alpha = 0.40f) else palette.textSecondary.copy(alpha = 0.70f),
                     animationSpec = tween(250),
                     label = "lyricColor"
                 )
 
                 val textScale by animateFloatAsState(
-                    targetValue = if (isActive) 1.06f else 1.0f,
+                    targetValue = if (isActive) 1.08f else 1.0f,
                     animationSpec = spring(stiffness = 400f),
                     label = "lyricScale"
                 )
@@ -1034,21 +1125,21 @@ private fun SyncedLyricsView(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(if (isActive) palette.surfaceVariant.copy(alpha = 0.40f) else Color.Transparent)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(if (isActive) palette.surfaceVariant.copy(alpha = 0.50f) else Color.Transparent)
                         .clickable(
                             interactionSource = remember(index) { MutableInteractionSource() },
                             indication = null
                         ) { onSeekTo(line.timestampMs) }
-                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
                 ) {
                     Text(
                         text = line.text,
                         color = textColor,
-                        fontSize = if (isActive) 20.sp else 16.sp,
-                        fontWeight = if (isActive) FontWeight.ExtraBold else FontWeight.SemiBold,
+                        fontSize = if (isActive) 21.sp else 16.sp,
+                        fontWeight = if (isActive) FontWeight.Black else FontWeight.SemiBold,
                         textAlign = TextAlign.Start,
-                        lineHeight = 26.sp,
+                        lineHeight = 28.sp,
                         modifier = Modifier.scale(textScale)
                     )
                 }

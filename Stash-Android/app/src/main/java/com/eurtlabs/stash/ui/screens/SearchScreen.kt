@@ -92,6 +92,8 @@ fun SearchScreen(
         "Lofi Hip Hop"
     )
 
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+
     if (searchResults.isNotEmpty()) {
         androidx.activity.compose.BackHandler {
             onClearSearch()
@@ -109,8 +111,14 @@ fun SearchScreen(
                 onQueryChange = onSearchQueryChange,
                 isFetching = isSearching,
                 fetchingMessage = "Searching YouTube & Music...",
-                onAnalyzeUrl = { query -> onSearch(query) },
-                onClearSearch = onClearSearch
+                onAnalyzeUrl = { query -> 
+                    focusManager.clearFocus()
+                    onSearch(query) 
+                },
+                onClearSearch = {
+                    focusManager.clearFocus()
+                    onClearSearch()
+                }
             )
         }
 
@@ -130,7 +138,10 @@ fun SearchScreen(
                             .clickable(
                                 interactionSource = remember(filter) { MutableInteractionSource() },
                                 indication = null
-                            ) { onFilterChanged(filter) }
+                            ) { 
+                                focusManager.clearFocus()
+                                onFilterChanged(filter) 
+                            }
                             .background(
                                 if (isSelected) {
                                     Brush.verticalGradient(
@@ -143,10 +154,10 @@ fun SearchScreen(
                                 }
                             )
                             .border(
-                                width = if (isSelected) 1.2.dp else 1.dp,
+                                width = 1.dp,
                                 brush = Brush.verticalGradient(
-                                    if (isSelected) listOf(Color.White.copy(alpha = 0.50f), Color.White.copy(alpha = 0.15f))
-                                    else listOf(Color.White.copy(alpha = 0.25f), Color.White.copy(alpha = 0.05f))
+                                    if (isSelected) listOf(Color.White.copy(alpha = 0.4f), Color.Transparent)
+                                    else listOf(Color.White.copy(alpha = 0.12f), Color.White.copy(alpha = 0.02f))
                                 ),
                                 shape = RoundedCornerShape(20.dp)
                             )
@@ -193,14 +204,22 @@ fun SearchScreen(
                     downloadProgress = downloadProgress,
                     isDownloaded = isDownloaded,
                     onPlay = { 
+                        focusManager.clearFocus()
                         if (resultItem.isArtist) {
                             onSelectArtist(resultItem.title, resultItem.thumbnailUrl)
                         } else {
-                            onPlayTrack(resultItem, searchResults)
+                            val playableSongs = searchResults.filter { !it.isArtist && it.id.isNotBlank() }
+                            onPlayTrack(resultItem, playableSongs)
                         }
                     },
-                    onDownload = { onDownloadItem(resultItem) },
-                    onSelectArtist = onSelectArtist
+                    onDownload = { 
+                        focusManager.clearFocus()
+                        onDownloadItem(resultItem) 
+                    },
+                    onSelectArtist = { name, img ->
+                        focusManager.clearFocus()
+                        onSelectArtist(name, img)
+                    }
                 )
             }
         } else {
@@ -496,8 +515,7 @@ private fun SearchResultCard(
                 fontSize = 11.5.sp,
                 color = palette.textSecondary,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.clickable { onSelectArtist(item.artist, null) }
+                overflow = TextOverflow.Ellipsis
             )
         }
 

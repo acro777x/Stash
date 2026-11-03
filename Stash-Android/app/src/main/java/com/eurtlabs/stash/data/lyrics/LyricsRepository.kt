@@ -42,6 +42,12 @@ object LyricsRepository {
         val cleanArtist = cleanArtistTerm(artistName)
         val cacheKey = "${cleanTitle.lowercase()}_${cleanArtist.lowercase()}"
 
+        // Check 0ms in-memory cache first before any network roundtrips
+        lyricsMemoryCache.get(cacheKey)?.let { cached ->
+            Log.d(TAG, "Instant 0ms Lyrics Cache Hit: $cacheKey")
+            return@withContext cached
+        }
+
         // Tier 0: Official YouTube Music Lyrics directly from InnerTube browse endpoint
         if (!videoId.isNullOrBlank()) {
             try {
@@ -63,12 +69,6 @@ object LyricsRepository {
             }
         }
 
-        // Check 0ms in-memory cache
-        lyricsMemoryCache.get(cacheKey)?.let { cached ->
-            Log.d(TAG, "Instant 0ms Lyrics Cache Hit: $cacheKey")
-            return@withContext cached
-        }
-
         // Tier 1: LRCLIB exact match
         val lrclibResult = fetchFromLrclib(cleanTitle, cleanArtist, durationMs)
         if (lrclibResult != null && (lrclibResult.syncedLyrics.isNotEmpty() || !lrclibResult.plainLyrics.isNullOrBlank())) {
@@ -76,28 +76,35 @@ object LyricsRepository {
             return@withContext lrclibResult
         }
 
-        // Tier 2: LRCLIB fuzzy query search
+        // Tier 2: KuGou Synced Lyrics (Ported from Fiend / ViMusic)
+        val kugouResult = fetchFromKuGou(cleanTitle, cleanArtist, durationMs)
+        if (kugouResult != null && (kugouResult.syncedLyrics.isNotEmpty() || !kugouResult.plainLyrics.isNullOrBlank())) {
+            lyricsMemoryCache.put(cacheKey, kugouResult)
+            return@withContext kugouResult
+        }
+
+        // Tier 3: LRCLIB fuzzy query search
         val lrclibSearchResult = searchLrclib(cleanTitle, cleanArtist)
         if (lrclibSearchResult != null && (lrclibSearchResult.syncedLyrics.isNotEmpty() || !lrclibSearchResult.plainLyrics.isNullOrBlank())) {
             lyricsMemoryCache.put(cacheKey, lrclibSearchResult)
             return@withContext lrclibSearchResult
         }
 
-        // Tier 3: Netease Cloud Music Open Synchronized Lyrics
+        // Tier 4: Netease Cloud Music Open Synchronized Lyrics
         val neteaseResult = fetchFromNetease(cleanTitle, cleanArtist)
         if (neteaseResult != null && (neteaseResult.syncedLyrics.isNotEmpty() || !neteaseResult.plainLyrics.isNullOrBlank())) {
             lyricsMemoryCache.put(cacheKey, neteaseResult)
             return@withContext neteaseResult
         }
 
-        // Tier 4: BetterLyrics fallback
+        // Tier 5: BetterLyrics fallback
         val betterLyricsResult = fetchFromBetterLyrics(cleanTitle, cleanArtist)
         if (betterLyricsResult != null) {
             lyricsMemoryCache.put(cacheKey, betterLyricsResult)
             return@withContext betterLyricsResult
         }
 
-        // Tier 5: Title-only search fallback (if artist was noisy/unknown)
+        // Tier 6: Title-only search fallback (if artist was noisy/unknown)
         if (cleanArtist.isNotBlank() && cleanArtist != "Unknown") {
             val titleOnlyResult = searchLrclib(cleanTitle, "")
             if (titleOnlyResult != null && (titleOnlyResult.syncedLyrics.isNotEmpty() || !titleOnlyResult.plainLyrics.isNullOrBlank())) {
@@ -335,33 +342,135 @@ object LyricsRepository {
         }
     }
 
+    /**
+     * KuGou Lyrics Provider (Ported from Fiend / ViMusic)
+     * Massive catalogue for Indian, Asian, and international synchronized timecodes.
+     */
+    private fun fetchFromKuGou(title: String, artist: String, durationMs: Long): LyricsResult? {
+        return try {
+            val query = "$title - $artist"
+            val encQuery = URLEncoder.encode(query, "UTF-8")
+            val searchUrl = "https://mobileservice.kugou.com/api/v3/search/song?version=9108&plat=0&pagesize=8&showtype=0&keyword=$encQuery"
+
+            val searchReq = Request.Builder()
+                .url(searchUrl)
+                .header("User-Agent", "KuGouMusic/9108 (Android)")
+                .build()
+
+            var songHash: String? = null
+            client.newCall(searchReq).execute().use { resp ->
+                if (!resp.isSuccessful) return null
+                val body = resp.body?.string() ?: return null
+                val json = JSONObject(body)
+                val data = json.optJSONObject("data") ?: return null
+                val info = data.optJSONArray("info") ?: return null
+                val targetDurationSec = (durationMs / 1000).toInt()
+
+                for (i in 0 until info.length()) {
+                    val item = info.getJSONObject(i)
+                    val duration = item.optInt("duration", 0)
+                    val hash = item.optString("hash", "")
+                    if (hash.isNotBlank()) {
+                        if (targetDurationSec <= 0 || Math.abs(duration - targetDurationSec) <= 12) {
+                            songHash = hash
+                            break
+                        }
+                    }
+                }
+                if (songHash == null && info.length() > 0) {
+                    songHash = info.getJSONObject(0).optString("hash", "")
+                }
+            }
+
+            if (songHash.isNullOrBlank()) return null
+
+            // Search lyrics by hash
+            val lrcSearchUrl = "https://lyrics.kugou.com/search?ver=1&man=yes&client=pc&hash=$songHash"
+            val lrcSearchReq = Request.Builder().url(lrcSearchUrl).build()
+
+            var lyricId: Long = 0
+            var accessKey: String? = null
+
+            client.newCall(lrcSearchReq).execute().use { resp ->
+                if (!resp.isSuccessful) return null
+                val body = resp.body?.string() ?: return null
+                val json = JSONObject(body)
+                val candidates = json.optJSONArray("candidates") ?: return null
+                if (candidates.length() > 0) {
+                    val cand = candidates.getJSONObject(0)
+                    lyricId = cand.optLong("id", 0L)
+                    accessKey = cand.optString("accesskey", "")
+                }
+            }
+
+            if (lyricId == 0L || accessKey.isNullOrBlank()) return null
+
+            // Download lyrics
+            val downloadUrl = "https://lyrics.kugou.com/download?ver=1&client=pc&id=$lyricId&accesskey=$accessKey&fmt=lrc&charset=utf8"
+            val downloadReq = Request.Builder().url(downloadUrl).build()
+
+            var lrcContent: String? = null
+            client.newCall(downloadReq).execute().use { resp ->
+                if (!resp.isSuccessful) return null
+                val body = resp.body?.string() ?: return null
+                val json = JSONObject(body)
+                val base64Content = json.optString("content", "")
+                if (base64Content.isNotBlank()) {
+                    val decodedBytes = android.util.Base64.decode(base64Content, android.util.Base64.DEFAULT)
+                    lrcContent = String(decodedBytes, Charsets.UTF_8)
+                }
+            }
+
+            val lrc = lrcContent ?: return null
+            val parsedLines = parseLrc(lrc)
+            if (parsedLines.isEmpty() && lrc.isBlank()) return null
+
+            LyricsResult(
+                trackName = title,
+                artistName = artist,
+                plainLyrics = lrc.lines().filter { !it.startsWith("[") }.joinToString("\n").ifBlank { lrc },
+                syncedLyrics = parsedLines,
+                source = "KuGou (Synchronized)"
+            )
+        } catch (e: Exception) {
+            Log.d(TAG, "KuGou lyrics fetch error: ${e.message}")
+            null
+        }
+    }
+
+    private val titleCleanupPatterns = listOf(
+        Regex("""\s*\(.*?(official|video|audio|lyrics|lyric|visualizer|hd|hq|4k|remaster|remix|live|acoustic|version|edit|extended|radio|clean|explicit).*?\)""", RegexOption.IGNORE_CASE),
+        Regex("""\s*\[.*?(official|video|audio|lyrics|lyric|visualizer|hd|hq|4k|remaster|remix|live|acoustic|version|edit|extended|radio|clean|explicit).*?\]""", RegexOption.IGNORE_CASE),
+        Regex("""\s*【.*?】"""),
+        Regex("""\s*\|.*$"""),
+        Regex("""\s*-\s*(official|video|audio|lyrics|lyric|visualizer).*$""", RegexOption.IGNORE_CASE),
+        Regex("""\s*\(feat\..*?\)""", RegexOption.IGNORE_CASE),
+        Regex("""\s*\(ft\..*?\)""", RegexOption.IGNORE_CASE),
+        Regex("""\s*feat\..*$""", RegexOption.IGNORE_CASE),
+        Regex("""\s*ft\..*$""", RegexOption.IGNORE_CASE),
+    )
+
+    private val artistSeparators = listOf(" & ", " and ", ", ", " x ", " X ", " feat. ", " feat ", " ft. ", " ft ", " featuring ", " with ")
+
     private fun cleanSearchTerm(input: String): String {
-        return input
-            .replace(Regex("\\[.*?\\]"), "")
-            .replace(Regex("\\(Official Music Video.*?\\)", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("\\(Official Video.*?\\)", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("\\(Official Audio.*?\\)", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("\\(Visualizer.*?\\)", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("\\(Visualiser.*?\\)", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("\\(Audio.*?\\)", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("\\(Lyric Video.*?\\)", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("\\(Lyrics.*?\\)", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("\\(Remastered.*?\\)", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("\\(Live.*?\\)", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("\\(4K.*?\\)", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("\\(HD.*?\\)", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("\\(Explicit.*?\\)", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("\\|.*"), "")
-            .replace(Regex("ft\\..*|feat\\..*", RegexOption.IGNORE_CASE), "")
-            .trim()
+        var cleaned = input.trim()
+        for (pattern in titleCleanupPatterns) {
+            cleaned = cleaned.replace(pattern, "")
+        }
+        return cleaned.trim()
     }
 
     private fun cleanArtistTerm(input: String): String {
-        return input
+        var cleaned = input
             .replace(" - Topic", "", ignoreCase = true)
             .replace("VEVO", "", ignoreCase = true)
-            .substringBefore(",")
-            .substringBefore("&")
             .trim()
+        for (separator in artistSeparators) {
+            if (cleaned.contains(separator, ignoreCase = true)) {
+                cleaned = cleaned.split(Regex(Regex.escape(separator), RegexOption.IGNORE_CASE), limit = 2)[0]
+                break
+            }
+        }
+        return cleaned.trim()
     }
 }
