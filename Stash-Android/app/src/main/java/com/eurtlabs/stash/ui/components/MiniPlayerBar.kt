@@ -27,10 +27,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
+import com.eurtlabs.stash.data.storage.PlaylistStore
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -185,7 +188,20 @@ fun MiniPlayerBar(
                             }
                         }
 
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+
+                        // Like Heart Button with Tactile Spring Bounce
+                        val likedTrackIds by PlaylistStore.likedTrackIds.collectAsState()
+                        val isLiked = likedTrackIds.contains(currentTrack.id)
+
+                        AnimatedHeartButton(
+                            isLiked = isLiked,
+                            onToggleLike = { PlaylistStore.toggleLike(currentTrack) },
+                            iconSize = 19.dp,
+                            containerSize = 34.dp
+                        )
+
+                        Spacer(modifier = Modifier.width(4.dp))
 
                         // Play/Pause Circular Action Button
                         Box(

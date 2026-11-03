@@ -21,8 +21,10 @@ import coil.request.ImageRequest
 import com.eurtlabs.stash.MainActivity
 import com.eurtlabs.stash.R
 import com.eurtlabs.stash.StashApplication
+import com.eurtlabs.stash.data.model.PlaybackRepeatMode
 import com.eurtlabs.stash.data.model.TrackInfo
 import com.eurtlabs.stash.player.MusicPlayerManager
+import com.eurtlabs.stash.data.storage.PlaylistStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -39,6 +41,7 @@ class MusicPlaybackService : Service() {
 
     companion object {
         const val NOTIFICATION_ID = 2002
+        const val WAKE_LOCK_TIMEOUT_MS = 30 * 60 * 1000L // 30 minutes
 
         const val ACTION_PLAY = "com.eurtlabs.stash.ACTION_PLAY"
         const val ACTION_PAUSE = "com.eurtlabs.stash.ACTION_PAUSE"
@@ -46,6 +49,8 @@ class MusicPlaybackService : Service() {
         const val ACTION_NEXT = "com.eurtlabs.stash.ACTION_NEXT"
         const val ACTION_STOP = "com.eurtlabs.stash.ACTION_STOP"
         const val ACTION_UPDATE_NOTIFICATION = "com.eurtlabs.stash.ACTION_UPDATE_NOTIFICATION"
+        const val ACTION_TOGGLE_LIKE = "com.eurtlabs.stash.ACTION_TOGGLE_LIKE"
+        const val ACTION_TOGGLE_REPEAT = "com.eurtlabs.stash.ACTION_TOGGLE_REPEAT"
 
         const val EXTRA_TITLE = "EXTRA_TITLE"
         const val EXTRA_ARTIST = "EXTRA_ARTIST"
@@ -88,17 +93,19 @@ class MusicPlaybackService : Service() {
         }
 
         fun stop(context: Context) {
-            val intent = Intent(context, MusicPlaybackService::class.java).apply {
-                action = ACTION_STOP
+            try {
+                context.stopService(Intent(context, MusicPlaybackService::class.java))
+            } catch (e: Exception) {
+                // Ignore
             }
-            context.startService(intent)
         }
     }
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
     private var mediaSession: MediaSessionCompat? = null
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val serviceJob = SupervisorJob()
+    private val scope = CoroutineScope(serviceJob + Dispatchers.Main)
 
     private var currentTitle = "Stash Music"
     private var currentArtist = "Playing Audio"
@@ -114,7 +121,7 @@ class MusicPlaybackService : Service() {
             val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
             wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Stash::MusicPlaybackWakeLock").apply {
                 setReferenceCounted(false)
-                acquire()
+                acquire(WAKE_LOCK_TIMEOUT_MS)
             }
 
             val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
@@ -150,7 +157,33 @@ class MusicPlaybackService : Service() {
                     override fun onStop() {
                         MusicPlayerManager.stop()
                     }
+
+                    override fun onCustomAction(action: String?, extras: android.os.Bundle?) {
+                        when (action) {
+                            ACTION_TOGGLE_LIKE -> {
+                                val track = MusicPlayerManager.playerState.value.currentTrack
+                                if (track != null) {
+                                    PlaylistStore.toggleLike(track)
+                                    updatePlaybackState(isPlaying)
+                                    postForegroundNotification()
+                                }
+                            }
+                            ACTION_TOGGLE_REPEAT -> {
+                                MusicPlayerManager.toggleRepeatMode()
+                                updatePlaybackState(isPlaying)
+                                postForegroundNotification()
+                            }
+                        }
+                    }
                 })
+
+            // Real-time synchronization of Like/Heart state in notification
+            scope.launch {
+                PlaylistStore.likedTrackIds.collect {
+                    updatePlaybackState(isPlaying)
+                    postForegroundNotification()
+                }
+            }
                 isActive = true
             }
         } catch (e: Exception) {
@@ -173,13 +206,34 @@ class MusicPlaybackService : Service() {
                 MusicPlayerManager.skipNext()
             }
             ACTION_STOP -> {
-                MusicPlayerManager.stop()
-                updatePlaybackState(playing = false)
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
+                try {
+                    updatePlaybackState(playing = false)
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                } catch (e: Exception) {
+                    // Ignore
+                }
                 return START_NOT_STICKY
             }
+                        ACTION_TOGGLE_LIKE -> {
+                val track = MusicPlayerManager.playerState.value.currentTrack
+                if (track != null) {
+                    PlaylistStore.toggleLike(track)
+                    updatePlaybackState(isPlaying)
+                    postForegroundNotification()
+                }
+                return START_STICKY
+            }
+            ACTION_TOGGLE_REPEAT -> {
+                MusicPlayerManager.toggleRepeatMode()
+                updatePlaybackState(isPlaying)
+                postForegroundNotification()
+                return START_STICKY
+            }
             ACTION_UPDATE_NOTIFICATION -> {
+                // Re-acquire wake lock to prevent background kill
+                wakeLock?.let { if (!it.isHeld) it.acquire(WAKE_LOCK_TIMEOUT_MS) }
+
                 currentTitle = intent.getStringExtra(EXTRA_TITLE) ?: currentTitle
                 currentArtist = intent.getStringExtra(EXTRA_ARTIST) ?: currentArtist
                 val newArtUrl = intent.getStringExtra(EXTRA_ART_URL) ?: ""
@@ -209,10 +263,33 @@ class MusicPlaybackService : Service() {
                 PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
                 PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
                 PlaybackStateCompat.ACTION_SEEK_TO or
-                PlaybackStateCompat.ACTION_STOP
+                PlaybackStateCompat.ACTION_STOP or
+                PlaybackStateCompat.ACTION_SET_RATING
+
+        val currentTrack = MusicPlayerManager.playerState.value.currentTrack
+        val isLiked = currentTrack != null && PlaylistStore.isLiked(currentTrack.id)
+        val repeatMode = MusicPlayerManager.playerState.value.repeatMode
+        val repeatIcon = when (repeatMode) {
+            PlaybackRepeatMode.ONE -> R.drawable.ic_repeat_one
+            else -> R.drawable.ic_repeat
+        }
+
+        val likeCustomAction = PlaybackStateCompat.CustomAction.Builder(
+            ACTION_TOGGLE_LIKE,
+            if (isLiked) "Unlike" else "Like",
+            if (isLiked) R.drawable.ic_heart_filled else R.drawable.ic_heart_outline
+        ).build()
+
+        val repeatCustomAction = PlaybackStateCompat.CustomAction.Builder(
+            ACTION_TOGGLE_REPEAT,
+            "Repeat",
+            repeatIcon
+        ).build()
 
         val playbackState = PlaybackStateCompat.Builder()
             .setActions(actions)
+            .addCustomAction(likeCustomAction)
+            .addCustomAction(repeatCustomAction)
             .setState(state, currentPositionMs, 1.0f)
             .build()
 
@@ -327,6 +404,40 @@ class MusicPlaybackService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
+        val currentTrack = MusicPlayerManager.playerState.value.currentTrack
+        val isLiked = currentTrack != null && PlaylistStore.isLiked(currentTrack.id)
+        val repeatMode = MusicPlayerManager.playerState.value.repeatMode
+        val repeatIcon = when (repeatMode) {
+            PlaybackRepeatMode.ONE -> R.drawable.ic_repeat_one
+            else -> R.drawable.ic_repeat
+        }
+
+        val likeIntent = PendingIntent.getService(
+            this,
+            4,
+            Intent(this, MusicPlaybackService::class.java).apply { action = ACTION_TOGGLE_LIKE },
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val likeAction = NotificationCompat.Action.Builder(
+            if (isLiked) R.drawable.ic_heart_filled else R.drawable.ic_heart_outline,
+            if (isLiked) "Liked" else "Like",
+            likeIntent
+        ).build()
+
+        val repeatIntent = PendingIntent.getService(
+            this,
+            5,
+            Intent(this, MusicPlaybackService::class.java).apply { action = ACTION_TOGGLE_REPEAT },
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val repeatAction = NotificationCompat.Action.Builder(
+            repeatIcon,
+            "Repeat",
+            repeatIntent
+        ).build()
+
         val builder = NotificationCompat.Builder(this, StashApplication.PLAYBACK_CHANNEL_ID)
             .setContentTitle(currentTitle)
             .setContentText(currentArtist)
@@ -337,13 +448,15 @@ class MusicPlaybackService : Service() {
             .setOngoing(isPlaying)
             .setShowWhen(false)
             .setOnlyAlertOnce(true)
-            .addAction(android.R.drawable.ic_media_previous, "Previous", prevIntent)
-            .addAction(playPauseAction)
-            .addAction(android.R.drawable.ic_media_next, "Next", nextIntent)
+            .addAction(likeAction) // 0: Like
+            .addAction(android.R.drawable.ic_media_previous, "Previous", prevIntent) // 1: Prev
+            .addAction(playPauseAction) // 2: Play/Pause
+            .addAction(android.R.drawable.ic_media_next, "Next", nextIntent) // 3: Next
+            .addAction(repeatAction) // 4: Repeat
             .setStyle(
                 androidx.media.app.NotificationCompat.MediaStyle()
                     .setMediaSession(mediaSession?.sessionToken)
-                    .setShowActionsInCompactView(0, 1, 2)
+                    .setShowActionsInCompactView(1, 2, 3)
             )
 
         cachedArtBitmap?.let {
@@ -357,6 +470,7 @@ class MusicPlaybackService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        serviceJob.cancel() // Prevent leaked coroutines
         mediaSession?.apply {
             isActive = false
             release()

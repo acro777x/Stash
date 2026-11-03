@@ -70,6 +70,7 @@ import com.eurtlabs.stash.viewmodel.DownloadViewModel
 import android.webkit.WebSettings
 import com.eurtlabs.stash.data.downloader.YoutubeDLManager
 import com.eurtlabs.stash.data.downloader.CookieManager
+import com.eurtlabs.stash.player.MusicPlayerManager
 
 class MainActivity : ComponentActivity() {
 
@@ -130,18 +131,29 @@ class MainActivity : ComponentActivity() {
             val settings by viewModel.settings.collectAsState()
             val batches by viewModel.queueBatches.collectAsState()
             val libraryBatches by viewModel.libraryBatches.collectAsState()
+            androidx.compose.runtime.LaunchedEffect(libraryBatches) {
+                MusicPlayerManager.localLibraryItems = libraryBatches.flatMap { it.items }.filter {
+                    it.state == DownloadState.COMPLETED && !it.finalFilePath.isNullOrBlank()
+                }
+            }
             val isFetching by viewModel.isFetching.collectAsState()
             val fetchingMessage by viewModel.fetchingMessage.collectAsState()
 
             val quickPicks by viewModel.quickPicks.collectAsState()
             val trendingHits by viewModel.trendingHits.collectAsState()
+            val topCharts by viewModel.topCharts.collectAsState()
+            val newReleases by viewModel.newReleases.collectAsState()
             val isDiscoverLoading by viewModel.isDiscoverLoading.collectAsState()
             val selectedDiscoverMood by viewModel.selectedDiscoverMood.collectAsState()
             val isSearching by viewModel.isSearching.collectAsState()
+            val searchQuery by viewModel.searchQuery.collectAsState()
             val searchResults by viewModel.searchResults.collectAsState()
             val searchFilter by viewModel.searchFilter.collectAsState()
             val showStorageDialog by viewModel.showStorageDialog.collectAsState()
+            val activeDownloadsMap by viewModel.activeDownloadsMap.collectAsState()
+            val downloadedTrackIds by viewModel.downloadedTrackIds.collectAsState()
             var showFullPlayer by androidx.compose.runtime.remember { mutableStateOf(false) }
+            var selectedArtistProfile by androidx.compose.runtime.remember { mutableStateOf<Pair<String, String?>?>(null) }
 
             val activeDownloadsCount = batches.flatMap { it.items }.count {
                 it.state == DownloadState.DOWNLOADING || it.state == DownloadState.CONVERTING || it.state == DownloadState.TAGGING
@@ -226,6 +238,8 @@ class MainActivity : ComponentActivity() {
                                         DiscoverScreen(
                                             quickPicks = quickPicks,
                                             trendingHits = trendingHits,
+                                            topCharts = topCharts,
+                                            newReleases = newReleases,
                                             isLoading = isDiscoverLoading,
                                             selectedMood = selectedDiscoverMood,
                                             activeDownloadsMap = activeDownloadsMap,
@@ -234,11 +248,16 @@ class MainActivity : ComponentActivity() {
                                             onPlayTrack = { track, list -> viewModel.playOnlineTrack(track, list) },
                                             onDownloadTrack = { item ->
                                                 viewModel.enqueueTrackFromSearch(item)
+                                            },
+                                            onSearchArtist = { artistName ->
+                                                selectedArtistProfile = Pair(artistName, null)
                                             }
                                         )
                                     }
                                     NavigationTab.SEARCH -> {
                                         SearchScreen(
+                                            searchQuery = searchQuery,
+                                            onSearchQueryChange = { viewModel.setSearchQuery(it) },
                                             isSearching = isSearching,
                                             searchResults = searchResults,
                                             selectedFilter = searchFilter,
@@ -253,6 +272,9 @@ class MainActivity : ComponentActivity() {
                                             },
                                             onDownloadAll = { items, artistName ->
                                                 viewModel.enqueueAllSearchResults(items, artistName)
+                                            },
+                                            onSelectArtist = { name, img ->
+                                                selectedArtistProfile = Pair(name, img)
                                             }
                                         )
                                     }
@@ -329,7 +351,9 @@ class MainActivity : ComponentActivity() {
                         val activePlayerState by com.eurtlabs.stash.player.MusicPlayerManager.playerState.collectAsState()
                         val currentTrack = activePlayerState.currentTrack
                         val isTrackDownloaded = libraryBatches.flatMap { it.items }.any { it.trackInfo.id == currentTrack?.id && it.state == com.eurtlabs.stash.data.model.DownloadState.COMPLETED }
-                        val isTrackDownloading = batches.flatMap { it.items }.any { it.trackInfo.id == currentTrack?.id && (it.state == com.eurtlabs.stash.data.model.DownloadState.DOWNLOADING || it.state == com.eurtlabs.stash.data.model.DownloadState.QUEUED) }
+                        val activeDownloadingItem = batches.flatMap { it.items }.find { it.trackInfo.id == currentTrack?.id && (it.state == com.eurtlabs.stash.data.model.DownloadState.DOWNLOADING || it.state == com.eurtlabs.stash.data.model.DownloadState.QUEUED) }
+                        val isTrackDownloading = activeDownloadingItem != null
+                        val trackDownloadProgress = activeDownloadingItem?.progress ?: 0f
 
                         FullPlayerSheet(
                             onDismiss = { showFullPlayer = false },
@@ -347,7 +371,22 @@ class MainActivity : ComponentActivity() {
                                 viewModel.enqueueTrackFromSearch(searchItem)
                             },
                             isDownloaded = isTrackDownloaded,
-                            isDownloading = isTrackDownloading
+                            isDownloading = isTrackDownloading,
+                            downloadProgress = trackDownloadProgress
+                        )
+                    }
+
+                    if (selectedArtistProfile != null) {
+                        val (artistName, artistImg) = selectedArtistProfile!!
+                        com.eurtlabs.stash.ui.components.ArtistDetailSheet(
+                            artistName = artistName,
+                            artistImageUrl = artistImg,
+                            onDismiss = { selectedArtistProfile = null },
+                            onPlayTrack = { track, list -> viewModel.playOnlineTrack(track, list) },
+                            onDownloadTrack = { item -> viewModel.enqueueTrackFromSearch(item) },
+                            onExpandPlayer = { showFullPlayer = true },
+                            activeDownloadsMap = activeDownloadsMap,
+                            downloadedTrackIds = downloadedTrackIds
                         )
                     }
                 }
@@ -418,6 +457,23 @@ class MainActivity : ComponentActivity() {
                 viewModel.parseAndEnqueue(sharedText)
                 activeTabState = NavigationTab.QUEUE
             }
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        MusicPlayerManager.isAppInForeground = true
+    }
+
+    override fun onStop() {
+        super.onStop()
+        MusicPlayerManager.isAppInForeground = false
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        if (isFinishing) {
+            MusicPlayerManager.release()
         }
     }
 }

@@ -5,10 +5,14 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
 import android.util.Log
+import coil.ImageLoader
+import coil.ImageLoaderFactory
+import coil.disk.DiskCache
+import coil.memory.MemoryCache
 import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
 
-class StashApplication : Application() {
+class StashApplication : Application(), ImageLoaderFactory {
 
     companion object {
         const val CHANNEL_ID = "stash_download_channel"
@@ -16,10 +20,29 @@ class StashApplication : Application() {
         private const val TAG = "StashApp"
     }
 
+    override fun newImageLoader(): ImageLoader {
+        return ImageLoader.Builder(this)
+            .memoryCache {
+                MemoryCache.Builder(this)
+                    .maxSizePercent(0.15) // Limit image cache to 15% of available RAM
+                    .build()
+            }
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(cacheDir.resolve("image_cache"))
+                    .maxSizeBytes(50L * 1024 * 1024) // 50MB disk cache
+                    .build()
+            }
+            .respectCacheHeaders(false)
+            .crossfade(true)
+            .build()
+    }
+
     override fun onCreate() {
         super.onCreate()
         createNotificationChannels()
         initNativeEngines()
+        com.eurtlabs.stash.data.storage.PlaylistStore.initialize(this)
     }
 
     private fun createNotificationChannels() {

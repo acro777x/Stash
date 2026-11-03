@@ -16,7 +16,11 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
+import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
@@ -28,6 +32,7 @@ import com.eurtlabs.stash.data.model.PlaybackRepeatMode
 import com.eurtlabs.stash.data.model.SearchResultItem
 import com.eurtlabs.stash.data.model.TrackInfo
 import com.eurtlabs.stash.service.MusicPlaybackService
+import com.eurtlabs.stash.data.storage.TasteStore
 import com.eurtlabs.stash.util.ArtworkUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -72,15 +77,23 @@ object MusicPlayerManager {
     private var equalizer: Equalizer? = null
     private var bassBoost: BassBoost? = null
 
+    private var simpleCache: SimpleCache? = null
+    private var cacheDataSourceFactory: CacheDataSource.Factory? = null
+    var localLibraryItems: List<DownloadItem> = emptyList()
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var progressJob: Job? = null
     private var lyricsJob: Job? = null
     private var artworkJob: Job? = null
     private var sleepTimerJob: Job? = null
     private var playbackStreamJob: Job? = null
+    private var prefetchJob: Job? = null
 
     private val _playerState = MutableStateFlow(PlayerState())
     val playerState: StateFlow<PlayerState> = _playerState.asStateFlow()
+
+    @Volatile
+    var isAppInForeground: Boolean = true
 
     private val httpDataSourceFactory = DefaultHttpDataSource.Factory()
         .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -99,6 +112,22 @@ object MusicPlayerManager {
     fun initialize(context: Context) {
         if (appContext != null) return
         appContext = context.applicationContext
+        TasteStore.initialize(context)
+
+        try {
+            val cacheDir = File(appContext!!.cacheDir, "media_cache")
+            if (!cacheDir.exists()) cacheDir.mkdirs()
+            val evictor = LeastRecentlyUsedCacheEvictor(250L * 1024 * 1024) // 250MB auto-evicting audio cache
+            val databaseProvider = StandaloneDatabaseProvider(appContext!!)
+            simpleCache = SimpleCache(cacheDir, evictor, databaseProvider)
+            cacheDataSourceFactory = CacheDataSource.Factory()
+                .setCache(simpleCache!!)
+                .setUpstreamDataSourceFactory(httpDataSourceFactory)
+                .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+            Log.d(TAG, "Initialized ExoPlayer 250MB SimpleCache successfully.")
+        } catch (e: Exception) {
+            Log.e(TAG, "SimpleCache init error: ${e.message}")
+        }
 
         val audioAttributes = AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
@@ -215,6 +244,7 @@ object MusicPlayerManager {
             MusicPlaybackService.start(ctx, track, isPlaying = true, positionMs = 0L, durationMs = track.durationMs)
         }
 
+        TasteStore.recordPlay(track.id, track.title, track.artists.firstOrNull() ?: "")
         fetchStudioArtworkForTrack(track)
         fetchLyricsForTrack(track)
         prefetchQueue(index)
@@ -224,6 +254,13 @@ object MusicPlayerManager {
      * Instantly streams an online song from search or discovery.
      */
     fun playOnlineTrack(searchItem: SearchResultItem, allItems: List<SearchResultItem> = emptyList()) {
+        val localMatch = findLocalDownloadedItem(searchItem.id)
+        if (localMatch != null && !localMatch.finalFilePath.isNullOrBlank() && File(localMatch.finalFilePath).exists()) {
+            Log.d(TAG, "Search track ${searchItem.id} already exists locally. Playing from disk: ${localMatch.finalFilePath}")
+            playLibraryItem(localMatch, localLibraryItems)
+            return
+        }
+
         val initialArtUrl = ArtworkUtils.getHighResArtworkUrl(searchItem.thumbnailUrl, searchItem.id)
 
         val track = TrackInfo(
@@ -237,8 +274,9 @@ object MusicPlayerManager {
             safeFileName = searchItem.title
         )
 
-        val queueTracks = if (allItems.isNotEmpty()) {
-            allItems.map { item ->
+        val validItems = allItems.filter { !it.isArtist && it.id.isNotBlank() }
+        val queueTracks = if (validItems.isNotEmpty()) {
+            validItems.map { item ->
                 TrackInfo(
                     id = item.id,
                     title = item.title,
@@ -277,7 +315,8 @@ object MusicPlayerManager {
                 withContext(Dispatchers.Main) {
                     try {
                         val mediaItem = MediaItem.fromUri(Uri.parse(streamUrl))
-                        val mediaSource = ProgressiveMediaSource.Factory(httpDataSourceFactory)
+                        val dataSource = cacheDataSourceFactory ?: httpDataSourceFactory
+                        val mediaSource = ProgressiveMediaSource.Factory(dataSource)
                             .createMediaSource(mediaItem)
 
                         exoPlayer?.apply {
@@ -300,6 +339,7 @@ object MusicPlayerManager {
 
         fetchStudioArtworkForTrack(track)
         fetchLyricsForTrack(track)
+        TasteStore.recordPlay(track.id, track.title, track.artists.firstOrNull() ?: "")
         prefetchQueue(index)
     }
 
@@ -307,9 +347,103 @@ object MusicPlayerManager {
         playLibraryItem(item, queue)
     }
 
+    fun playQueue(tracks: List<TrackInfo>, startIndex: Int = 0) {
+        if (tracks.isEmpty()) return
+        val targetIndex = startIndex.coerceIn(0, tracks.lastIndex)
+        playTrack(tracks[targetIndex], tracks)
+    }
+
+    fun findLocalDownloadedItem(trackId: String): DownloadItem? {
+        return localLibraryItems.firstOrNull {
+            it.trackInfo.id == trackId &&
+            !it.finalFilePath.isNullOrBlank() &&
+            File(it.finalFilePath).exists()
+        }
+    }
+
+    fun clearMediaCache() {
+        try {
+            simpleCache?.keys?.forEach { key ->
+                simpleCache?.removeResource(key)
+            }
+            Log.d(TAG, "ExoPlayer media cache cleared.")
+        } catch (e: Exception) {
+            Log.e(TAG, "Clear media cache error: ${e.message}")
+        }
+    }
+
+    fun playTrack(track: TrackInfo, queueTracks: List<TrackInfo> = emptyList()) {
+        val fullQueue = if (queueTracks.isNotEmpty()) queueTracks else listOf(track)
+        val index = fullQueue.indexOfFirst { it.id == track.id }.coerceAtLeast(0)
+
+        // Instant local bypass: if track is already downloaded, play from device storage in 0ms
+        val localItem = findLocalDownloadedItem(track.id)
+        if (localItem != null && !localItem.finalFilePath.isNullOrBlank() && File(localItem.finalFilePath).exists()) {
+            Log.d(TAG, "Track ${track.id} is downloaded locally. Playing from disk: ${localItem.finalFilePath}")
+            playLibraryItem(localItem, localLibraryItems)
+            return
+        }
+
+        _playerState.value = _playerState.value.copy(
+            currentTrack = track,
+            currentItem = null,
+            isStreaming = true,
+            isBuffering = true,
+            queue = fullQueue,
+            queueIndex = index,
+            syncedLyrics = emptyList(),
+            plainLyrics = null,
+            isLyricsLoading = true
+        )
+
+        appContext?.let { ctx ->
+            MusicPlaybackService.start(ctx, track, isPlaying = true, positionMs = 0L, durationMs = track.durationMs)
+        }
+
+        playbackStreamJob?.cancel()
+        playbackStreamJob = scope.launch {
+            val streamUrl = InnerTubeMusicRepository.resolveStreamUrl(track.id)
+            if (streamUrl != null) {
+                withContext(Dispatchers.Main) {
+                    try {
+                        val mediaItem = MediaItem.fromUri(Uri.parse(streamUrl))
+                        val dataSource = cacheDataSourceFactory ?: httpDataSourceFactory
+                        val mediaSource = ProgressiveMediaSource.Factory(dataSource)
+                            .createMediaSource(mediaItem)
+
+                        exoPlayer?.apply {
+                            stop()
+                            clearMediaItems()
+                            setMediaSource(mediaSource)
+                            prepare()
+                            play()
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to start ExoPlayer stream: ${e.message}")
+                        _playerState.value = _playerState.value.copy(isBuffering = false)
+                    }
+                }
+            } else {
+                Log.e(TAG, "Could not resolve stream URL for ${track.id}")
+                _playerState.value = _playerState.value.copy(isBuffering = false)
+            }
+        }
+
+        fetchStudioArtworkForTrack(track)
+        fetchLyricsForTrack(track)
+        prefetchQueue(index)
+    }
+
     fun playTrackFromQueue(index: Int) {
         val state = _playerState.value
         val track = state.queue.getOrNull(index) ?: return
+
+        // Instant local bypass
+        val localItem = findLocalDownloadedItem(track.id)
+        if (localItem != null && !localItem.finalFilePath.isNullOrBlank() && File(localItem.finalFilePath).exists()) {
+            playLibraryItem(localItem, localLibraryItems)
+            return
+        }
 
         _playerState.value = state.copy(
             currentTrack = track,
@@ -326,13 +460,15 @@ object MusicPlayerManager {
             MusicPlaybackService.start(ctx, track, isPlaying = true, positionMs = 0L, durationMs = track.durationMs)
         }
 
-        scope.launch {
+        playbackStreamJob?.cancel()
+        playbackStreamJob = scope.launch {
             val streamUrl = InnerTubeMusicRepository.resolveStreamUrl(track.id)
             if (streamUrl != null) {
                 withContext(Dispatchers.Main) {
                     try {
                         val mediaItem = MediaItem.fromUri(Uri.parse(streamUrl))
-                        val mediaSource = ProgressiveMediaSource.Factory(httpDataSourceFactory)
+                        val dataSource = cacheDataSourceFactory ?: httpDataSourceFactory
+                        val mediaSource = ProgressiveMediaSource.Factory(dataSource)
                             .createMediaSource(mediaItem)
 
                         exoPlayer?.apply {
@@ -344,8 +480,11 @@ object MusicPlayerManager {
                         }
                     } catch (e: Exception) {
                         Log.e(TAG, "Error playing track from queue: ${e.message}")
+                        _playerState.value = _playerState.value.copy(isBuffering = false)
                     }
                 }
+            } else {
+                _playerState.value = _playerState.value.copy(isBuffering = false)
             }
         }
 
@@ -355,15 +494,16 @@ object MusicPlayerManager {
     }
 
     private fun prefetchQueue(currentIndex: Int) {
-        val state = _playerState.value
-        val upcoming = listOf(currentIndex + 1, currentIndex + 2)
-        for (idx in upcoming) {
-            val nextTrack = state.queue.getOrNull(idx) ?: continue
-            scope.launch(Dispatchers.IO) {
-                InnerTubeMusicRepository.resolveStreamUrl(nextTrack.id)
-                val artist = nextTrack.artists.firstOrNull() ?: ""
-                ArtworkUtils.fetchStudioArtwork(nextTrack.title, artist, nextTrack.id, nextTrack.albumArtUrl)
-            }
+        prefetchJob?.cancel()
+        prefetchJob = scope.launch(Dispatchers.IO) {
+            // Delay queue prefetching by 4 seconds so active playback starts cleanly without CPU/network contention
+            delay(4000)
+            val state = _playerState.value
+            val nextTrack = state.queue.getOrNull(currentIndex + 1) ?: return@launch
+            Log.d(TAG, "Prefetching next track: ${nextTrack.title}")
+            InnerTubeMusicRepository.resolveStreamUrl(nextTrack.id)
+            val artist = nextTrack.artists.firstOrNull() ?: ""
+            ArtworkUtils.fetchStudioArtwork(nextTrack.title, artist, nextTrack.id, nextTrack.albumArtUrl)
         }
     }
 
@@ -561,7 +701,8 @@ object MusicPlayerManager {
                         durationMs = player.duration.coerceAtLeast(0L)
                     )
                 }
-                delay(200)
+                // Adaptive polling: fast in foreground, slow in background to save CPU/battery
+                delay(if (isAppInForeground) 200L else 1000L)
             }
         }
     }
@@ -603,7 +744,8 @@ object MusicPlayerManager {
             val lyricsResult = LyricsRepository.fetchLyrics(
                 trackTitle = track.title,
                 artistName = artist,
-                durationMs = track.durationMs
+                durationMs = track.durationMs,
+                videoId = track.id
             )
 
             withContext(Dispatchers.Main) {
@@ -631,5 +773,25 @@ object MusicPlayerManager {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to attach hardware audio effects: ${e.message}")
         }
+    }
+
+    /**
+     * Releases all player resources. Call when the app is fully finishing.
+     */
+    fun release() {
+        progressJob?.cancel()
+        lyricsJob?.cancel()
+        artworkJob?.cancel()
+        playbackStreamJob?.cancel()
+        sleepTimerJob?.cancel()
+        try { equalizer?.release() } catch (_: Exception) {}
+        try { bassBoost?.release() } catch (_: Exception) {}
+        equalizer = null
+        bassBoost = null
+        exoPlayer?.release()
+        exoPlayer = null
+        try { appContext?.unregisterReceiver(noisyReceiver) } catch (_: Exception) {}
+        appContext?.let { MusicPlaybackService.stop(it) }
+        Log.d(TAG, "MusicPlayerManager fully released")
     }
 }

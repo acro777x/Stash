@@ -129,12 +129,12 @@ data class DownloadBatch(
     val isCompleted: Boolean = false
 )
 
-enum class SearchFilter(val label: String) {
-    ALL("All"),
-    MUSIC("Songs & Music"),
-    ARTISTS("Artists"),
-    VIDEOS("Videos"),
-    LIBRARY("My Library")
+enum class SearchFilter(val label: String, val params: String = "") {
+    ALL("All", ""),
+    MUSIC("Songs & Music", "EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D"),
+    ARTISTS("Artists", "EgWKAQIgAWoKEAkQChAFEAMQBA%3D%3D"),
+    VIDEOS("Videos", "EgWKAQIQAWoKEAkQChAFEAMQBA%3D%3D"),
+    LIBRARY("My Library", "")
 }
 
 data class SearchResultItem(
@@ -144,7 +144,10 @@ data class SearchResultItem(
     val durationText: String = "",
     val thumbnailUrl: String? = null,
     val url: String,
-    val isAudio: Boolean = true
+    val isAudio: Boolean = true,
+    val isArtist: Boolean = false,
+    val browseId: String = "",
+    val subscriberCount: String = ""
 )
 
 data class LyricLine(
@@ -157,7 +160,16 @@ data class LyricsResult(
     val artistName: String,
     val plainLyrics: String? = null,
     val syncedLyrics: List<LyricLine> = emptyList(),
-    val source: String = "LRCLIB"
+    val source: String = "Stash Engine"
+)
+
+data class UserPlaylist(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String,
+    val description: String = "",
+    val coverArtUrl: String? = null,
+    val tracks: List<TrackInfo> = emptyList(),
+    val createdAt: Long = System.currentTimeMillis()
 )
 
 enum class PlaybackRepeatMode {

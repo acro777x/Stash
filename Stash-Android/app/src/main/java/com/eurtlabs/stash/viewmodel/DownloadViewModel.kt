@@ -61,11 +61,20 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
     private val _trendingHits = MutableStateFlow<List<SearchResultItem>>(emptyList())
     val trendingHits: StateFlow<List<SearchResultItem>> = _trendingHits.asStateFlow()
 
+    private val _topCharts = MutableStateFlow<List<SearchResultItem>>(emptyList())
+    val topCharts: StateFlow<List<SearchResultItem>> = _topCharts.asStateFlow()
+
+    private val _newReleases = MutableStateFlow<List<SearchResultItem>>(emptyList())
+    val newReleases: StateFlow<List<SearchResultItem>> = _newReleases.asStateFlow()
+
     private val _isDiscoverLoading = MutableStateFlow(false)
     val isDiscoverLoading: StateFlow<Boolean> = _isDiscoverLoading.asStateFlow()
 
     private val _selectedDiscoverMood = MutableStateFlow("All")
     val selectedDiscoverMood: StateFlow<String> = _selectedDiscoverMood.asStateFlow()
+
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
     private val _searchResults = MutableStateFlow<List<SearchResultItem>>(emptyList())
     val searchResults: StateFlow<List<SearchResultItem>> = _searchResults.asStateFlow()
@@ -141,8 +150,12 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
             try {
                 val picks = InnerTubeMusicRepository.getQuickPicks()
                 val trending = InnerTubeMusicRepository.getTrendingHits()
+                val charts = InnerTubeMusicRepository.getTopCharts()
+                val releases = InnerTubeMusicRepository.getNewReleases()
                 _quickPicks.value = picks
                 _trendingHits.value = trending
+                _topCharts.value = charts
+                _newReleases.value = releases
             } catch (e: Exception) {
                 // Ignore
             } finally {
@@ -268,10 +281,18 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
 
     fun setSearchFilter(filter: SearchFilter) {
         _searchFilter.value = filter
+        if (_searchQuery.value.isNotBlank()) {
+            performSearch(_searchQuery.value)
+        }
+    }
+
+    fun setSearchQuery(query: String) {
+        _searchQuery.value = query
     }
 
     fun performSearch(query: String) {
         if (query.isBlank()) return
+        _searchQuery.value = query
         viewModelScope.launch {
             _isSearching.value = true
             try {
@@ -279,8 +300,13 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
                     val results = YoutubeLibraryFetcher.fetchLibrary(query.trim())
                     _searchResults.value = results
                 } else {
-                    val results = YoutubeDLManager.searchMedia(query.trim(), _searchFilter.value)
-                    _searchResults.value = results
+                    val fastResults = InnerTubeMusicRepository.search(query.trim(), _searchFilter.value)
+                    if (fastResults.isNotEmpty()) {
+                        _searchResults.value = fastResults
+                    } else {
+                        val results = YoutubeDLManager.searchMedia(query.trim(), _searchFilter.value)
+                        _searchResults.value = results
+                    }
                 }
             } catch (e: Exception) {
                 Log.e("DownloadViewModel", "Search error: ${e.message}", e)
@@ -292,6 +318,7 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun clearSearch() {
+        _searchQuery.value = ""
         _searchResults.value = emptyList()
     }
 

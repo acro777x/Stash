@@ -6,3 +6,16 @@
 
 # Keep models for reflection/serialization
 -keep class com.eurtlabs.stash.data.model.** { *; }
+
+# Media3 & ExoPlayer
+-keep class androidx.media3.** { *; }
+-dontwarn androidx.media3.**
+
+# OkHttp & Okio
+-dontwarn okhttp3.**
+-dontwarn okio.**
+-keepnames class okhttp3.internal.publicsuffix.PublicSuffixDatabase
+
+# Coil Image Loader
+-keep class coil.** { *; }
+-dontwarn coil.**
